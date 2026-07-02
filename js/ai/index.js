@@ -1,10 +1,19 @@
-// Engine adapter selection for the AI seat.
+// Engine adapter selection for the AI seat: the WASM engine (Rust negamax
+// with an embedded value network) when it loads, else the pure-JS engine.
 
 import { createJsEngine } from './engine.js';
+import { createWasmEngine } from './wasm.js';
 
 /** @returns {Promise<import('../app/ports.js').PlayerController>} */
 export async function createAiPlayer() {
-  return createJsEngine();
+  try {
+    const res = await fetch(new URL('../../wasm/engine.wasm', import.meta.url));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await createWasmEngine(await res.arrayBuffer());
+  } catch (err) {
+    console.warn('WASM engine unavailable, using JS engine', err);
+    return createJsEngine();
+  }
 }
 
 /**

@@ -116,10 +116,10 @@ function searchRoot(s, deadline) {
 }
 
 /** @returns {import('../app/ports.js').PlayerController} */
-export function createJsEngine() {
+export function createJsEngine({ timeBudgetMs = TIME_BUDGET_MS } = {}) {
   return {
     async chooseMove(state) {
-      return searchRoot(state, performance.now() + TIME_BUDGET_MS);
+      return searchRoot(state, performance.now() + timeBudgetMs);
     },
   };
 }
