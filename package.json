@@ -1,0 +1,11 @@
+{
+  "name": "tictactangle",
+  "version": "1.0.0",
+  "description": "Tic Tac Two — 5x5 board, movable 3x3 grid, in-browser AI",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}

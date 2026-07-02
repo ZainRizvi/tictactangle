@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tic Tac Two</title>
+  <meta name="description" content="Tic Tac Two — the tic-tac-toe variant on a 5x5 board with a movable 3x3 grid. Play locally or against an in-browser AI." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='6' y='6' width='88' height='88' rx='18' fill='%230b0c11' stroke='%23ffb648' stroke-width='6'/%3E%3Cpath d='M30 30 L54 54 M54 30 L30 54' stroke='%23ff5d4d' stroke-width='10' stroke-linecap='round'/%3E%3Ccircle cx='64' cy='66' r='13' fill='none' stroke='%2333e0c0' stroke-width='9'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="masthead">
+    <h1 class="logo">TIC<span class="logo-dot">·</span>TAC<span class="logo-dot">·</span><span class="logo-two">TWO</span></h1>
+    <p class="tagline">three in a row — but the board won't sit still</p>
+  </header>
+
+  <main class="layout">
+    <section class="stage">
+      <div class="board-frame">
+        <div class="board-area">
+          <div class="board" id="board" data-turn="x" data-can-place="1"></div>
+          <div class="spotlight" id="spotlight">
+            <button class="g-arrow" data-dr="-1" data-dc="0"  style="top:0;left:50%"    aria-label="Slide grid up">↑</button>
+            <button class="g-arrow" data-dr="-1" data-dc="1"  style="top:0;left:100%"   aria-label="Slide grid up-right">↗</button>
+            <button class="g-arrow" data-dr="0"  data-dc="1"  style="top:50%;left:100%" aria-label="Slide grid right">→</button>
+            <button class="g-arrow" data-dr="1"  data-dc="1"  style="top:100%;left:100%" aria-label="Slide grid down-right">↘</button>
+            <button class="g-arrow" data-dr="1"  data-dc="0"  style="top:100%;left:50%" aria-label="Slide grid down">↓</button>
+            <button class="g-arrow" data-dr="1"  data-dc="-1" style="top:100%;left:0"   aria-label="Slide grid down-left">↙</button>
+            <button class="g-arrow" data-dr="0"  data-dc="-1" style="top:50%;left:0"    aria-label="Slide grid left">←</button>
+            <button class="g-arrow" data-dr="-1" data-dc="-1" style="top:0;left:0"      aria-label="Slide grid up-left">↖</button>
+          </div>
+          <div class="endgame" id="endgame" hidden>
+            <div class="endgame-card">
+              <div class="endgame-title" id="endTitle"></div>
+              <div class="endgame-sub" id="endSub"></div>
+              <button class="btn btn-primary" id="againBtn">play again</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="hint" id="hint" aria-live="polite"></p>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <div class="mode-switch" role="group" aria-label="Game mode">
+          <button class="mode-btn is-active" id="modePvp" data-mode="pvp">2 players</button>
+          <button class="mode-btn" id="modeAi" data-mode="ai">vs AI</button>
+        </div>
+        <div class="side-picker" id="sidePicker" hidden>
+          <span class="side-label">you play</span>
+          <div class="side-btns" role="group" aria-label="Your side">
+            <button class="side-btn side-x is-active" id="sideX">X</button>
+            <button class="side-btn side-o" id="sideO">O</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card turn-card" id="turnCard">
+        <span class="turn-glyph" id="turnGlyph"></span>
+        <div class="turn-text">
+          <b id="turnLabel" aria-live="polite">X to move</b>
+          <span id="phaseLabel">placement phase</span>
+        </div>
+      </div>
+
+      <div class="card reserves">
+        <div class="reserve" id="reserveX">
+          <span class="reserve-label rl-x">X reserve</span>
+          <div class="chips" id="chipsX"></div>
+        </div>
+        <div class="reserve" id="reserveO">
+          <span class="reserve-label rl-o">O reserve</span>
+          <div class="chips" id="chipsO"></div>
+        </div>
+      </div>
+
+      <div class="card legend">
+        <div class="legend-row"><span class="legend-key">tap a lit cell</span><span>place a piece</span></div>
+        <div class="legend-row"><span class="legend-key">tap piece, then cell</span><span>move it into the light</span></div>
+        <div class="legend-row"><span class="legend-key">tap an arrow</span><span>slide the grid</span></div>
+      </div>
+
+      <div class="panel-buttons">
+        <button class="btn btn-primary" id="newGameBtn">new game</button>
+        <button class="btn" id="rulesBtn">rules</button>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <span>a <a href="https://gamescrafters.berkeley.edu/games.php?game=tictactwo" target="_blank" rel="noopener">tic-tac-toe variant</a> · <a id="repoLink" href="https://github.com/ZainRizvi/tictactangle" target="_blank" rel="noopener">source</a></span>
+  </footer>
+
+  <dialog id="rulesDialog" class="rules-dialog">
+    <h2>how to play</h2>
+    <ol>
+      <li>The board is 5×5. Only the lit 3×3 grid is in play — the grid moves.</li>
+      <li>Each player has <b>4 pieces</b>. Your first two turns must be placements, on empty lit cells.</li>
+      <li>Once both players have placed two pieces, a turn is <b>one</b> of:
+        <ul>
+          <li><b>Place</b> a remaining piece on an empty lit cell.</li>
+          <li><b>Slide the grid</b> one step in any direction (it stays on the board).</li>
+          <li><b>Move</b> one of your pieces — from anywhere, even the dark — to an empty lit cell.</li>
+        </ul>
+      </li>
+      <li>Make <b>three in a row</b> of your pieces <em>inside the lit grid</em> to win. Pieces in the dark don't count.</li>
+      <li>If a grid slide lights up three-in-a-row for <em>both</em> players at once, the game is a tie.</li>
+    </ol>
+    <button class="btn btn-primary" id="rulesCloseBtn">got it</button>
+  </dialog>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
