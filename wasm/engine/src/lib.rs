@@ -8,6 +8,8 @@
 //! the grid one step (grid stays on the board), or move an own piece from
 //! anywhere to an empty grid cell. Three own pieces in a row inside the grid
 //! wins; a slide lighting up lines for both players at once is a tie.
+//! No take-backs: immediately after a slide, the reply may not slide the
+//! grid straight back to the position it just left.
 
 #![no_std]
 
@@ -23,6 +25,9 @@ pub struct State {
     pub cr: i8,
     pub cc: i8,
     pub turn: u8, // 1 = X, 2 = O
+    // Center a grid slide may not land on this turn (-1,-1 = none).
+    pub br: i8,
+    pub bc: i8,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -131,7 +136,7 @@ pub fn legal_moves(s: &State, out: &mut [Move; 96]) -> usize {
         for &(dr, dc) in &DIRS {
             let nr = s.cr + dr;
             let nc = s.cc + dc;
-            if (1..=3).contains(&nr) && (1..=3).contains(&nc) {
+            if (1..=3).contains(&nr) && (1..=3).contains(&nc) && !(nr == s.br && nc == s.bc) {
                 out[n] = pack(1, (dr + 1) as u32, (dc + 1) as u32);
                 n += 1;
             }
@@ -156,9 +161,14 @@ pub fn apply(s: &State, m: Move) -> (State, Outcome) {
     let kind = m >> 16;
     let a = (m >> 8) & 0xFF;
     let b = m & 0xFF;
+    // A slide arms the take-back ban for the reply; other moves clear it.
+    n.br = -1;
+    n.bc = -1;
     match kind {
         0 => n.board[a as usize] = n.turn,
         1 => {
+            n.br = n.cr;
+            n.bc = n.cc;
             n.cr += a as i8 - 1;
             n.cc += b as i8 - 1;
         }
@@ -401,7 +411,8 @@ static mut IN_BUF: [u8; 32] = [0; 32];
 static mut SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// Pointer to the 32-byte input buffer:
-/// bytes 0..25 board (0/1/2), 25 center row, 26 center col, 27 side to move.
+/// bytes 0..25 board (0/1/2), 25 center row, 26 center col, 27 side to move,
+/// 28/29 banned slide center (0 = none).
 #[no_mangle]
 pub extern "C" fn input_ptr() -> *mut u8 {
     core::ptr::addr_of_mut!(IN_BUF) as *mut u8
@@ -420,8 +431,18 @@ pub extern "C" fn choose_move(max_depth: u32, node_budget: u32) -> u32 {
         cr: buf[25] as i8,
         cc: buf[26] as i8,
         turn: buf[27],
+        br: buf[28] as i8,
+        bc: buf[29] as i8,
     };
     s.board.copy_from_slice(&buf[..25]);
+    // Banned center: both bytes 0 means none; anything else must be a valid
+    // center or the input is rejected below.
+    if s.br == 0 && s.bc == 0 {
+        s.br = -1;
+        s.bc = -1;
+    } else if !(1..=3).contains(&s.br) || !(1..=3).contains(&s.bc) {
+        return NO_MOVE;
+    }
     // Reject garbage input rather than risking out-of-bounds panics. Board
     // cells must be 0/1/2 with at most 4 pieces per side (this also bounds
     // legal_moves well under its output buffer).

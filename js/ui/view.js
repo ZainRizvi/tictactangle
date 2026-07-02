@@ -35,7 +35,8 @@ export function mountDomView({ session, configureSeats }) {
 
   // presentation state
   let snap = session.snapshot();
-  let selected = null; // board index of a selected own piece
+  let selected = null; // board index of a selected own piece (piece-first move)
+  let destination = null; // board index of a chosen empty lit cell (destination-first move)
   let mode = 'pvp';
   let humanSide = rules.X;
 
@@ -71,6 +72,16 @@ export function mountDomView({ session, configureSeats }) {
     const [r, c] = rules.rc(i);
     const occupant = s.board[i];
     const unlocked = rules.actionsUnlocked(s);
+    const emptyLit = occupant === rules.EMPTY && rules.inGrid(s, r, c);
+
+    // Destination-first move: a spot is chosen, now pick the piece to send.
+    if (destination !== null) {
+      if (i === destination) { destination = null; render(); return; }
+      if (occupant === s.turn) { session.movePiece(i, destination); return; }
+      if (emptyLit) { destination = i; render(); return; } // re-aim
+      nudge(i);
+      return;
+    }
 
     if (selected !== null) {
       if (i === selected) { selected = null; render(); return; }
@@ -89,8 +100,15 @@ export function mountDomView({ session, configureSeats }) {
       return;
     }
 
-    if (occupant === rules.EMPTY && rules.inGrid(s, r, c) && s.reserve[s.turn] > 0) {
+    if (emptyLit && s.reserve[s.turn] > 0) {
       session.place(i);
+      return;
+    }
+
+    // Out of pieces: tap the destination first, then choose which piece goes.
+    if (emptyLit && unlocked && s.reserve[s.turn] === 0) {
+      destination = i;
+      render();
       return;
     }
 
@@ -145,6 +163,8 @@ export function mountDomView({ session, configureSeats }) {
       const isTarget = selected !== null && occupant === rules.EMPTY && lit && interactive();
       const isOpen = occupant === rules.EMPTY && lit && canPlace;
       const isOwn = interactive() && unlocked && occupant === s.turn;
+      const isDest = destination === i;
+      const isCandidate = destination !== null && occupant === s.turn && interactive();
 
       el.className = 'cell';
       if (lit) el.classList.add('lit');
@@ -152,6 +172,8 @@ export function mountDomView({ session, configureSeats }) {
       if (isOwn) el.classList.add('own');
       if (selected === i) el.classList.add('selected');
       if (isTarget) el.classList.add('target');
+      if (isDest) el.classList.add('dest');
+      if (isCandidate) el.classList.add('candidate');
       const win = winCells.get(i);
       if (win) el.classList.add(win);
 
@@ -164,7 +186,7 @@ export function mountDomView({ session, configureSeats }) {
         // rebuilding the node and killing the animation mid-flight.
         if (snap.lastMove?.type === 'place' && snap.lastMove.to === i) cls.push('pop');
         html = `<span class="${cls.join(' ')}">${svgFor(occupant)}</span>`;
-      } else if (isTarget || isOpen) {
+      } else if (isTarget || isOpen || isDest) {
         html = `<span class="piece ghost">${svgFor(s.turn)}</span>`;
       }
       if (cellHtml[i] !== html) {
@@ -173,9 +195,10 @@ export function mountDomView({ session, configureSeats }) {
       }
 
       const who = occupant === rules.X ? 'X' : occupant === rules.O ? 'O' : 'empty';
+      const extra = selected === i ? ', selected' : isDest ? ', chosen destination' : '';
       el.setAttribute(
         'aria-label',
-        `row ${r + 1}, column ${c + 1} — ${who}${lit ? ', in the light' : ''}${selected === i ? ', selected' : ''}`
+        `row ${r + 1}, column ${c + 1} — ${who}${lit ? ', in the light' : ''}${extra}`
       );
     }
 
@@ -237,6 +260,8 @@ export function mountDomView({ session, configureSeats }) {
       hintEl.textContent = 'the machine is thinking…';
     } else if (!interactive()) {
       hintEl.textContent = '';
+    } else if (destination !== null) {
+      hintEl.textContent = 'tap one of your pieces to move it here — tap the spot again to cancel';
     } else if (selected !== null) {
       hintEl.textContent = 'tap an empty lit cell to move there — tap the piece again to cancel';
     } else if (!unlocked) {
@@ -327,8 +352,9 @@ export function mountDomView({ session, configureSeats }) {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && selected !== null && !rulesDialog.open) {
+    if (e.key === 'Escape' && (selected !== null || destination !== null) && !rulesDialog.open) {
       selected = null;
+      destination = null;
       render();
     }
   });
@@ -340,7 +366,8 @@ export function mountDomView({ session, configureSeats }) {
     snap = s;
     if (s.state !== lastState) {
       lastState = s.state;
-      selected = null; // any state change invalidates the selection
+      selected = null; // any state change invalidates the selections
+      destination = null;
     }
     render();
   });

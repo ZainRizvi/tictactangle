@@ -139,6 +139,25 @@ test('isLegal validates per move type, tolerating serialized null fields', () =>
   assert.ok(!isLegal(s, null));
 });
 
+test('no take-backs: the reply cannot slide the grid straight back', () => {
+  let s = newGame();
+  s = applyMove(s, { type: 'place', to: idx(1, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(1, 2) }); // O
+  s = applyMove(s, { type: 'place', to: idx(2, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(2, 2) }); // O
+  s = applyMove(s, { type: 'grid', dr: 1, dc: 0 }); // X slides (2,2) → (3,2)
+  assert.deepEqual(s.bannedCenter, { r: 2, c: 2 });
+  // O may not slide back up to (2,2)...
+  assert.ok(!isLegal(s, { type: 'grid', dr: -1, dc: 0 }));
+  // ...but every other slide stays available.
+  assert.ok(isLegal(s, { type: 'grid', dr: 0, dc: -1 }));
+  assert.ok(isLegal(s, { type: 'grid', dr: -1, dc: -1 }));
+  // A non-slide reply clears the ban for the next player.
+  s = applyMove(s, { type: 'place', to: idx(3, 3) }); // O places instead
+  assert.equal(s.bannedCenter, null);
+  assert.ok(isLegal(s, { type: 'grid', dr: -1, dc: 0 }));
+});
+
 test('grid cannot slide off the board', () => {
   let s = newGame();
   s = applyMove(s, { type: 'place', to: idx(1, 1) });
@@ -148,5 +167,7 @@ test('grid cannot slide off the board', () => {
   s = applyMove(s, { type: 'grid', dr: -1, dc: -1 }); // X: center now (1,1) — top-left extreme
   const gridMoves = legalMoves(s).filter((m) => m.type === 'grid');
   assert.ok(gridMoves.every((m) => m.dr >= 0 && m.dc >= 0));
-  assert.equal(gridMoves.length, 3);
+  // 3 in-bounds slides from the corner, minus the banned take-back to (2,2).
+  assert.equal(gridMoves.length, 2);
+  assert.ok(!gridMoves.some((m) => m.dr === 1 && m.dc === 1));
 });

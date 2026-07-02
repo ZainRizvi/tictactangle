@@ -100,6 +100,23 @@ test('wasm engine wins with a piece move when placements are exhausted', { skip 
   assert.equal(n.result.winner, X);
 });
 
+test('wasm engine honors the take-back ban even when reverting would win', { skip }, async () => {
+  const engine = await createWasmEngine(bytes, { maxDepth: 4, nodeBudget: 200000, seed: 7 });
+  const s = newGame();
+  // Same as the grid-slide-win position, but the winning center (2,2) is the
+  // position the grid just left — sliding back is illegal.
+  s.board[idx(3, 1)] = X; s.board[idx(3, 2)] = X; s.board[idx(3, 3)] = X; s.board[idx(0, 0)] = X;
+  s.board[idx(0, 2)] = O; s.board[idx(0, 3)] = O; s.board[idx(4, 0)] = O; s.board[idx(4, 4)] = O;
+  s.placed[X] = 4; s.placed[O] = 4;
+  s.reserve[X] = 0; s.reserve[O] = 0;
+  s.center = { r: 1, c: 2 };
+  s.bannedCenter = { r: 2, c: 2 };
+  const move = await engine.chooseMove(s);
+  assert.ok(isLegal(s, move), `illegal move ${JSON.stringify(move)}`);
+  const n = applyMove(s, move);
+  assert.notEqual(n.center?.r === 2 && n.center?.c === 2, true);
+});
+
 test('wasm engine rejects garbage input', { skip }, async () => {
   const engine = await createWasmEngine(bytes, { seed: 7 });
   const s = newGame();

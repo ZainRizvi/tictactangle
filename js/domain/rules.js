@@ -6,6 +6,8 @@
 // anywhere on the board) to an empty cell inside the grid.
 // First player with 3-in-a-row of their pieces inside the grid wins; a grid
 // slide that produces a line for both players at once is a tie.
+// No take-backs: immediately after a grid slide, the responding player may
+// not slide the grid straight back to the position it just left.
 
 export const EMPTY = 0;
 export const X = 1;
@@ -32,6 +34,7 @@ export function newGame() {
     reserve: { [X]: PIECES, [O]: PIECES },
     placed: { [X]: 0, [O]: 0 },
     ply: 0,
+    bannedCenter: null, // {r,c} a grid slide may not land on this turn
     result: null, // {type:'win', winner, line} | {type:'tie', xLine, oLine}
   };
 }
@@ -44,6 +47,7 @@ export function cloneState(s) {
     reserve: { [X]: s.reserve[X], [O]: s.reserve[O] },
     placed: { [X]: s.placed[X], [O]: s.placed[O] },
     ply: s.ply,
+    bannedCenter: s.bannedCenter ? { r: s.bannedCenter.r, c: s.bannedCenter.c } : null,
     result: s.result,
   };
 }
@@ -75,7 +79,10 @@ export const DIRS = [
 export function gridMoveValid(s, dr, dc) {
   const nr = s.center.r + dr;
   const nc = s.center.c + dc;
-  return nr >= CENTER_MIN && nr <= CENTER_MAX && nc >= CENTER_MIN && nc <= CENTER_MAX;
+  if (nr < CENTER_MIN || nr > CENTER_MAX || nc < CENTER_MIN || nc > CENTER_MAX) return false;
+  // No take-backs: can't slide the grid straight back where it just was.
+  if (s.bannedCenter && nr === s.bannedCenter.r && nc === s.bannedCenter.c) return false;
+  return true;
 }
 
 export function legalMoves(s) {
@@ -133,6 +140,8 @@ export function applyMove(s, m) {
     n.board[m.from] = EMPTY;
     n.board[m.to] = n.turn;
   }
+  // A slide arms the take-back ban for the reply; any other move clears it.
+  n.bannedCenter = m.type === 'grid' ? { r: s.center.r, c: s.center.c } : null;
   n.ply++;
 
   // A tie can only arise from a grid slide (a placement or piece move never

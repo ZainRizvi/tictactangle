@@ -28,6 +28,8 @@ export async function createWasmEngine(source, opts = {}) {
       buf[25] = state.center.r;
       buf[26] = state.center.c;
       buf[27] = state.turn;
+      buf[28] = state.bannedCenter?.r ?? 0;
+      buf[29] = state.bannedCenter?.c ?? 0;
       const packed = choose_move(maxDepth, nodeBudget) >>> 0;
       if (packed === NO_MOVE) return null;
       const kind = packed >> 16;

@@ -172,6 +172,25 @@ body::after {
   60% { transform: translateX(3px); }
 }
 
+/* destination-first move: chosen spot + candidate pieces */
+.cell.dest {
+  border-style: dashed;
+  border-color: var(--amber);
+  box-shadow: inset 0 0 0 1px var(--amber-soft), 0 0 16px rgba(255, 182, 72, 0.22);
+}
+
+.cell.dest .ghost { opacity: 0.45; }
+
+.cell.candidate { cursor: pointer; animation: beckon 1.2s ease-in-out infinite; }
+
+.board[data-turn='x'] .cell.candidate { border-color: var(--x-soft); }
+.board[data-turn='o'] .cell.candidate { border-color: var(--o-soft); }
+
+@keyframes beckon {
+  0%, 100% { box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.45); }
+  50% { box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.45), 0 0 14px rgba(255, 235, 200, 0.18); }
+}
+
 /* winning cells */
 .cell.win-x { border-color: var(--x); animation: winpulse-x 1.1s ease-in-out infinite; }
 .cell.win-o { border-color: var(--o); animation: winpulse-o 1.1s ease-in-out infinite; }
