@@ -1,5 +1,4 @@
 // Pure-JS alpha-beta engine implementing the PlayerController port.
-// Serves as the fallback opponent when the WASM model is unavailable.
 
 import { legalMoves, applyMove, LINES, idx, X, O, EMPTY, SIZE } from '../domain/rules.js';
 
@@ -55,6 +54,10 @@ function search(s, depth, alpha, beta, me, budget) {
     return s.result.winner === me ? WIN + depth : -(WIN + depth);
   }
   if (depth === 0 || budget.nodes-- <= 0) return evaluate(s, me);
+  if ((budget.nodes & 1023) === 0 && performance.now() > budget.deadline) {
+    budget.nodes = 0; // out of time: collapse the rest of this round
+    return evaluate(s, me);
+  }
 
   const moves = orderMoves(legalMoves(s));
   const maxing = s.turn === me;
@@ -84,7 +87,7 @@ function searchRoot(s, deadline) {
     let roundBest = -Infinity;
     let roundMove = null;
     let alpha = -Infinity;
-    const budget = { nodes: 400000 };
+    const budget = { nodes: 400000, deadline };
     let aborted = false;
 
     for (const m of moves) {
@@ -116,7 +119,6 @@ function searchRoot(s, deadline) {
 export function createJsEngine() {
   return {
     async chooseMove(state) {
-      await new Promise((r) => setTimeout(r, 30)); // let the UI paint first
       return searchRoot(state, performance.now() + TIME_BUDGET_MS);
     },
   };

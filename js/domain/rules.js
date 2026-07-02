@@ -93,9 +93,7 @@ export function legalMoves(s) {
     }
     for (let from = 0; from < SIZE * SIZE; from++) {
       if (s.board[from] !== s.turn) continue;
-      for (const to of empties) {
-        if (to !== from) moves.push({ type: 'move', from, to });
-      }
+      for (const to of empties) moves.push({ type: 'move', from, to });
     }
   }
   return moves;
@@ -137,6 +135,8 @@ export function applyMove(s, m) {
   }
   n.ply++;
 
+  // A tie can only arise from a grid slide (a placement or piece move never
+  // completes an opponent line), but checking both uniformly costs nothing.
   const xLine = findLine(n, X);
   const oLine = findLine(n, O);
   if (xLine && oLine) {
@@ -152,12 +152,13 @@ export function applyMove(s, m) {
 }
 
 export function isLegal(s, m) {
-  return legalMoves(s).some(
-    (lm) =>
-      lm.type === m.type &&
-      lm.to === m.to &&
-      lm.from === m.from &&
-      lm.dr === m.dr &&
-      lm.dc === m.dc
-  );
+  if (!m) return false;
+  // Compare only the fields relevant to each move type, so moves that have
+  // been serialized (JSON turns absent fields into null) still validate.
+  return legalMoves(s).some((lm) => {
+    if (lm.type !== m.type) return false;
+    if (m.type === 'place') return lm.to === m.to;
+    if (m.type === 'move') return lm.from === m.from && lm.to === m.to;
+    return lm.dr === m.dr && lm.dc === m.dc;
+  });
 }

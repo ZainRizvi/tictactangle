@@ -60,23 +60,10 @@ export function mountDomView({ session, configureSeats }) {
 
   // ---------- interaction ----------
 
-  const interactive = () => session.canAct();
-
-  function hasEmptyGridCell() {
-    return rules.gridCells(snap.state).some((i) => snap.state.board[i] === rules.EMPTY);
-  }
-
-  function pieceMoveLegal(from, to) {
-    const s = snap.state;
-    const [tr, tc] = rules.rc(to);
-    return (
-      rules.actionsUnlocked(s) &&
-      s.board[from] === s.turn &&
-      s.board[to] === rules.EMPTY &&
-      rules.inGrid(s, tr, tc) &&
-      from !== to
-    );
-  }
+  // Derived from the snapshot (not the live session) so the view stays a pure
+  // function of what it was last told.
+  const interactive = () =>
+    !snap.state.result && snap.busySeat === null && snap.seats[snap.state.turn] === null;
 
   function onCell(i) {
     if (!interactive()) return;
@@ -87,13 +74,16 @@ export function mountDomView({ session, configureSeats }) {
 
     if (selected !== null) {
       if (i === selected) { selected = null; render(); return; }
-      if (pieceMoveLegal(selected, i)) { session.movePiece(selected, i); return; }
+      if (rules.isLegal(s, { type: 'move', from: selected, to: i })) {
+        session.movePiece(selected, i);
+        return;
+      }
       if (occupant === s.turn && unlocked) { selected = i; render(); return; }
       nudge(i);
       return;
     }
 
-    if (occupant === s.turn && unlocked && hasEmptyGridCell()) {
+    if (occupant === s.turn && unlocked) {
       selected = i;
       render();
       return;
@@ -116,8 +106,14 @@ export function mountDomView({ session, configureSeats }) {
 
   // ---------- rendering ----------
 
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let paintedPly = -1; // gates one-shot move animations to fresh plies
+  const cellHtml = new Array(rules.SIZE * rules.SIZE).fill(null);
+
   function render() {
     const s = snap.state;
+    const isNewPly = s.ply !== paintedPly;
+    paintedPly = s.ply;
     const unlocked = rules.actionsUnlocked(s);
     const canPlace = interactive() && selected === null && s.reserve[s.turn] > 0;
 
@@ -148,7 +144,7 @@ export function mountDomView({ session, configureSeats }) {
       const occupant = s.board[i];
       const isTarget = selected !== null && occupant === rules.EMPTY && lit && interactive();
       const isOpen = occupant === rules.EMPTY && lit && canPlace;
-      const isOwn = interactive() && unlocked && occupant === s.turn && hasEmptyGridCell();
+      const isOwn = interactive() && unlocked && occupant === s.turn;
 
       el.className = 'cell';
       if (lit) el.classList.add('lit');
@@ -163,23 +159,33 @@ export function mountDomView({ session, configureSeats }) {
       if (occupant !== rules.EMPTY) {
         const cls = ['piece', occupant === rules.X ? 'px' : 'po'];
         if (!lit) cls.push('dark');
+        // 'pop' stays in the markup for the whole ply; the identity check
+        // below keeps same-ply re-renders (selection, busy-state emits) from
+        // rebuilding the node and killing the animation mid-flight.
         if (snap.lastMove?.type === 'place' && snap.lastMove.to === i) cls.push('pop');
         html = `<span class="${cls.join(' ')}">${svgFor(occupant)}</span>`;
       } else if (isTarget || isOpen) {
         html = `<span class="piece ghost">${svgFor(s.turn)}</span>`;
       }
-      el.innerHTML = html;
+      if (cellHtml[i] !== html) {
+        cellHtml[i] = html;
+        el.innerHTML = html;
+      }
+
+      const who = occupant === rules.X ? 'X' : occupant === rules.O ? 'O' : 'empty';
+      el.setAttribute(
+        'aria-label',
+        `row ${r + 1}, column ${c + 1} — ${who}${lit ? ', in the light' : ''}${selected === i ? ', selected' : ''}`
+      );
     }
 
-    animateLastMove();
+    if (isNewPly) animateLastMove();
     renderHud(unlocked);
     renderEndgame();
   }
 
-  let animatedPly = 0;
   function animateLastMove() {
-    if (snap.lastMove?.type !== 'move' || snap.state.ply === animatedPly) return;
-    animatedPly = snap.state.ply;
+    if (snap.lastMove?.type !== 'move' || reduceMotion.matches) return;
     const { from, to } = snap.lastMove;
     const fromRect = cellEls[from].getBoundingClientRect();
     const toRect = cellEls[to].getBoundingClientRect();
@@ -219,7 +225,14 @@ export function mountDomView({ session, configureSeats }) {
     renderChips(chipsOEl, rules.O);
 
     if (s.result) {
-      hintEl.textContent = '';
+      // Announced here too: the endgame overlay is revealed while hidden,
+      // which screen readers don't reliably read.
+      hintEl.textContent =
+        s.result.type === 'tie'
+          ? 'dead heat — one slide lit up both lines'
+          : `${s.result.winner === rules.X ? 'X' : 'O'} wins`;
+    } else if (snap.seatFault !== null) {
+      hintEl.textContent = 'the opponent stalled — start a new game';
     } else if (snap.busySeat !== null) {
       hintEl.textContent = 'the machine is thinking…';
     } else if (!interactive()) {
@@ -251,6 +264,7 @@ export function mountDomView({ session, configureSeats }) {
       endgameEl.hidden = true;
       return;
     }
+    const wasHidden = endgameEl.hidden;
     endTitleEl.className = 'endgame-title';
     if (s.result.type === 'tie') {
       endTitleEl.classList.add('tie');
@@ -268,6 +282,7 @@ export function mountDomView({ session, configureSeats }) {
       }
     }
     endgameEl.hidden = false;
+    if (wasHidden) requestAnimationFrame(() => $('againBtn').focus());
   }
 
   // ---------- controls ----------
@@ -280,7 +295,10 @@ export function mountDomView({ session, configureSeats }) {
     btn.addEventListener('click', () => {
       if (mode === btn.dataset.mode) return;
       mode = btn.dataset.mode;
-      for (const b of modeBtns) b.classList.toggle('is-active', b === btn);
+      for (const b of modeBtns) {
+        b.classList.toggle('is-active', b === btn);
+        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+      }
       $('sidePicker').hidden = mode !== 'ai';
       configureSeats(mode, humanSide);
     });
@@ -294,7 +312,10 @@ export function mountDomView({ session, configureSeats }) {
       const side = +btn.dataset.side;
       if (humanSide === side) return;
       humanSide = side;
-      for (const b of sideBtns) b.classList.toggle('is-active', b === btn);
+      for (const b of sideBtns) {
+        b.classList.toggle('is-active', b === btn);
+        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+      }
       if (mode === 'ai') configureSeats(mode, humanSide);
     });
   }

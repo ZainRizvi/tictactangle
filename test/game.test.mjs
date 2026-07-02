@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  newGame, applyMove, legalMoves, actionsUnlocked, findLine,
-  gridCells, idx, X, O, EMPTY, PIECES,
+  newGame, applyMove, legalMoves, actionsUnlocked, findLine, isLegal,
+  gridCells, idx, X, O, EMPTY,
 } from '../js/domain/rules.js';
 
 test('initial state: only placements inside centered grid', () => {
@@ -70,16 +70,29 @@ test('grid slide can produce a win', () => {
 
 test('grid slide revealing lines for both players is a tie', () => {
   const s = newGame();
-  // Hand-build a position: X row at board row 2 cols 2-4, O row at board row 4 cols 2-4,
-  // grid centered at (2,2) sees X's row only partially? Construct directly:
+  // X row on board row 2 cols 2-4, O row on board row 4 cols 2-4. With the
+  // grid centered at (2,2) neither row is fully lit; sliding to (3,3) lights
+  // both at once.
   s.board[idx(2, 2)] = X; s.board[idx(2, 3)] = X; s.board[idx(2, 4)] = X;
   s.board[idx(4, 2)] = O; s.board[idx(4, 3)] = O; s.board[idx(4, 4)] = O;
   s.placed[X] = 3; s.placed[O] = 3;
   s.reserve[X] = 1; s.reserve[O] = 1;
-  s.center = { r: 2, c: 2 }; // X row cells (2,3),(2,4) partially outside: col 4 outside? center c=2 → cols 1..3
-  // Slide grid to center (3,3): grid rows 2..4, cols 2..4 → contains both rows.
   const n = applyMove(s, { type: 'grid', dr: 1, dc: 1 });
   assert.equal(n.result?.type, 'tie');
+});
+
+test('sliding the grid onto only the opponent line loses for the mover', () => {
+  const s = newGame();
+  // O has a row on board row 3 cols 1-3; grid centered at (1,2) excludes it.
+  // X (to move) slides the grid down and reveals it: O wins.
+  s.board[idx(3, 1)] = O; s.board[idx(3, 2)] = O; s.board[idx(3, 3)] = O;
+  s.board[idx(0, 1)] = X; s.board[idx(0, 2)] = X; s.board[idx(1, 1)] = X;
+  s.placed[X] = 3; s.placed[O] = 3;
+  s.reserve[X] = 1; s.reserve[O] = 1;
+  s.center = { r: 1, c: 2 };
+  const n = applyMove(s, { type: 'grid', dr: 1, dc: 0 });
+  assert.equal(n.result?.type, 'win');
+  assert.equal(n.result.winner, O);
 });
 
 test('piece move: from anywhere on board to empty grid cell', () => {
@@ -107,6 +120,23 @@ test('reserve exhaustion: no placements once 4 pieces are down', () => {
   assert.equal(s.reserve[O], 0);
   assert.equal(s.result, null);
   assert.ok(legalMoves(s).every((m) => m.type !== 'place'));
+});
+
+test('isLegal validates per move type, tolerating serialized null fields', () => {
+  let s = newGame();
+  s = applyMove(s, { type: 'place', to: idx(1, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(1, 2) }); // O
+  s = applyMove(s, { type: 'place', to: idx(2, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(2, 2) }); // O — actions now unlocked
+  // A JSON round-trip turns absent fields into nulls; still legal.
+  assert.ok(isLegal(s, { type: 'place', to: idx(3, 3), from: null, dr: null, dc: null }));
+  assert.ok(isLegal(s, { type: 'grid', dr: 1, dc: 0, from: null, to: null }));
+  // Moving a piece to a cell outside the grid is rejected.
+  assert.ok(isLegal(s, { type: 'move', from: idx(1, 1), to: idx(3, 3) }));
+  assert.ok(!isLegal(s, { type: 'move', from: idx(1, 1), to: idx(0, 0) }));
+  // Moving the opponent's piece is rejected.
+  assert.ok(!isLegal(s, { type: 'move', from: idx(1, 2), to: idx(3, 3) }));
+  assert.ok(!isLegal(s, null));
 });
 
 test('grid cannot slide off the board', () => {

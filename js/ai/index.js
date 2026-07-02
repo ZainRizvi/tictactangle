@@ -1,5 +1,4 @@
-// AI adapter selection. Prefers the WASM neural model; falls back to the
-// pure-JS engine if WASM is unavailable in this browser.
+// Engine adapter selection for the AI seat.
 
 import { createJsEngine } from './engine.js';
 
@@ -9,16 +8,19 @@ export async function createAiPlayer() {
 }
 
 /**
- * Wraps a controller so it never resolves faster than `ms` — pacing so the
- * opponent's reply reads as a move, not a glitch.
+ * Paces a controller for play against a human: yields briefly so the UI can
+ * paint its "thinking" state before a synchronous engine blocks the thread,
+ * and never resolves faster than `ms` so the reply reads as a move, not a
+ * glitch.
  */
 export function withMinDelay(controller, ms) {
   return {
     async chooseMove(state) {
-      const [move] = await Promise.all([
-        controller.chooseMove(state),
-        new Promise((r) => setTimeout(r, ms)),
-      ]);
+      const start = performance.now();
+      await new Promise((r) => setTimeout(r, 30));
+      const move = await controller.chooseMove(state);
+      const remaining = ms - (performance.now() - start);
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       return move;
     },
   };

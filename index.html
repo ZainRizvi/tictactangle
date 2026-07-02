@@ -33,7 +33,7 @@
             <button class="g-arrow" data-dr="-1" data-dc="-1" style="top:0;left:0"      aria-label="Slide grid up-left">↖</button>
           </div>
           <div class="endgame" id="endgame" hidden>
-            <div class="endgame-card">
+            <div class="endgame-card" aria-live="assertive">
               <div class="endgame-title" id="endTitle"></div>
               <div class="endgame-sub" id="endSub"></div>
               <button class="btn btn-primary" id="againBtn">play again</button>
@@ -47,14 +47,14 @@
     <aside class="panel">
       <div class="card">
         <div class="mode-switch" role="group" aria-label="Game mode">
-          <button class="mode-btn is-active" id="modePvp" data-mode="pvp">2 players</button>
-          <button class="mode-btn" id="modeAi" data-mode="ai">vs AI</button>
+          <button class="mode-btn is-active" id="modePvp" data-mode="pvp" aria-pressed="true">2 players</button>
+          <button class="mode-btn" id="modeAi" data-mode="ai" aria-pressed="false">vs AI</button>
         </div>
         <div class="side-picker" id="sidePicker" hidden>
           <span class="side-label">you play</span>
           <div class="side-btns" role="group" aria-label="Your side">
-            <button class="side-btn side-x is-active" id="sideX">X</button>
-            <button class="side-btn side-o" id="sideO">O</button>
+            <button class="side-btn side-x is-active" id="sideX" aria-pressed="true">X</button>
+            <button class="side-btn side-o" id="sideO" aria-pressed="false">O</button>
           </div>
         </div>
       </div>
@@ -96,6 +96,7 @@
   </footer>
 
   <dialog id="rulesDialog" class="rules-dialog">
+    <div class="rules-body">
     <h2>how to play</h2>
     <ol>
       <li>The board is 5×5. Only the lit 3×3 grid is in play — the grid moves.</li>
@@ -111,6 +112,7 @@
       <li>If a grid slide lights up three-in-a-row for <em>both</em> players at once, the game is a tie.</li>
     </ol>
     <button class="btn btn-primary" id="rulesCloseBtn">got it</button>
+    </div>
   </dialog>
 
   <script type="module" src="js/main.js"></script>

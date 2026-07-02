@@ -15,6 +15,7 @@ export class GameSession {
     this.state = rules.newGame();
     this.lastMove = null;
     this.busySeat = null; // seat whose controller is currently thinking
+    this.seatFault = null; // seat whose controller failed or stalled
     this._listeners = new Set();
     this._token = 0;
   }
@@ -26,11 +27,17 @@ export class GameSession {
     return () => this._listeners.delete(fn);
   }
 
+  /**
+   * Snapshots share the underlying state object by reference for cheap
+   * change detection (a new state object per move). Subscribers must treat
+   * them as read-only; all mutation goes through intents.
+   */
   snapshot() {
     return {
       state: this.state,
       lastMove: this.lastMove,
       busySeat: this.busySeat,
+      seatFault: this.seatFault,
       seats: this.seats,
     };
   }
@@ -51,6 +58,7 @@ export class GameSession {
     this.state = rules.newGame();
     this.lastMove = null;
     this.busySeat = null;
+    this.seatFault = null;
     this._emit();
     this._pump();
   }
@@ -106,6 +114,9 @@ export class GameSession {
       this._apply(move);
     } else {
       if (move) console.error('seat controller returned illegal move', move);
+      // The game cannot continue without this seat's move; surface the fault
+      // so UIs can tell the player instead of freezing silently.
+      this.seatFault = this.state.turn;
       this._emit();
     }
   }

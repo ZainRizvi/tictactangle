@@ -35,7 +35,7 @@ js/
 │                     PlayerController (AI engine, network peer, replay…).
 ├── ai/
 │   ├── engine.js     Alpha-beta search engine implementing PlayerController.
-│   └── index.js      Adapter selection (WASM model preferred, JS fallback).
+│   └── index.js      Engine adapter selection and pacing for the AI seat.
 ├── ui/view.js        DOM view: subscribes to session snapshots, dispatches intents.
 │                     Holds only presentation state. Swappable wholesale.
 └── main.js           Composition root — the only place layers are wired together.
