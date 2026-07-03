@@ -348,7 +348,7 @@ export function mountDomView({ session, configureSeats }) {
     });
   }
 
-  const diffBtns = [$('diffMedium'), $('diffHard'), $('diffImpossible')];
+  const diffBtns = [$('diffEasy'), $('diffMedium'), $('diffHard'), $('diffImpossible')];
   for (const btn of diffBtns) {
     btn.addEventListener('click', () => {
       if (difficulty === btn.dataset.difficulty) return;

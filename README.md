@@ -29,8 +29,11 @@ small neural network as its leaf evaluator, trained to predict the eventual winn
 the side-to-move's perspective. Everything — search and inference — runs client-side in
 the WASM module; a pure-JS alpha-beta engine serves as fallback when WASM is unavailable.
 
-Two difficulty levels, each its own model generation:
+Four difficulty levels:
 
+- **Easy**: the medium engine barely allowed to think (depth 2, tiny node budget) — it
+  takes obvious wins and blocks one-ply threats but never plans ahead. In engine-vs-engine
+  play, medium beats it 18–1.
 - **Medium** (`engine-medium.wasm`, ~37 KB): 61→64→32→1 net (~6k parameters) trained on
   ~146k positions of noisy self-play by the JS engine; searches to depth 6 (~150 ms).
   Its evaluator beats both the JS engine and a handcrafted evaluation under identical

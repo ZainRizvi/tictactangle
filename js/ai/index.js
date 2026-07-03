@@ -6,6 +6,9 @@ import { createJsEngine } from './engine.js';
 import { createWasmEngine } from './wasm.js';
 
 export const DIFFICULTIES = {
+  // Same engine as medium, barely allowed to think: sees immediate wins and
+  // blocks one-ply threats, but never plans ahead.
+  easy: { file: 'engine-medium.wasm', maxDepth: 2, nodeBudget: 4_000 },
   medium: { file: 'engine-medium.wasm', maxDepth: 6, nodeBudget: 1_500_000 },
   hard: { file: 'engine-hard.wasm', maxDepth: 8, nodeBudget: 600_000 },
   // AlphaZero-style: MCTS over the self-play-trained policy/value net.
