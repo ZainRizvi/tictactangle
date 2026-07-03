@@ -8,6 +8,8 @@ import { createWasmEngine } from './wasm.js';
 export const DIFFICULTIES = {
   medium: { file: 'engine-medium.wasm', maxDepth: 6, nodeBudget: 1_500_000 },
   hard: { file: 'engine-hard.wasm', maxDepth: 8, nodeBudget: 600_000 },
+  // AlphaZero-style: MCTS over the self-play-trained policy/value net.
+  impossible: { file: 'engine-impossible.wasm', mcts: 8000 },
 };
 
 /**
@@ -22,6 +24,7 @@ export async function createAiPlayer(difficulty = 'medium') {
     return await createWasmEngine(await res.arrayBuffer(), {
       maxDepth: cfg.maxDepth,
       nodeBudget: cfg.nodeBudget,
+      mcts: cfg.mcts,
     });
   } catch (err) {
     console.warn('WASM engine unavailable, using JS engine', err);

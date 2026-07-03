@@ -9,9 +9,16 @@
 //! anywhere to an empty grid cell. Three own pieces in a row inside the grid
 //! wins; a slide lighting up lines for both players at once is a tie.
 
-#![no_std]
+// no_std on wasm keeps the artifact tiny; host builds (the RL trainer links
+// this crate natively) use std so the cdylib target compiles everywhere.
+#![cfg_attr(target_arch = "wasm32", no_std)]
 
 mod weights;
+
+#[cfg(feature = "rl")]
+mod mcts_play;
+#[cfg(feature = "rl")]
+mod rlnet;
 
 pub const EMPTY: u8 = 0;
 pub const PIECES: i32 = 4;
@@ -312,7 +319,7 @@ fn evaluate(s: &State) -> f32 {
 // Search
 // ---------------------------------------------------------------------------
 
-const WIN: f32 = 1000.0;
+pub const WIN: f32 = 1000.0;
 
 struct Ctx {
     nodes: i64,
@@ -365,6 +372,12 @@ fn search(s: &State, depth: i32, mut alpha: f32, beta: f32, ctx: &mut Ctx) -> f3
 
 /// Iterative-deepening root search; returns the chosen move.
 pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
+    choose_scored(s, max_depth, node_budget, seed).0
+}
+
+/// Like `choose`, also returning the best score found in the last trusted
+/// round (>= WIN means a forced win was proven within the search depth).
+pub fn choose_scored(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> (Move, f32) {
     let mut ctx = Ctx {
         nodes: node_budget,
         rng: seed | 1,
@@ -372,7 +385,7 @@ pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
     let mut moves = [0u32; 96];
     let n = legal_moves(s, &mut moves);
     if n == 0 {
-        return NO_MOVE;
+        return (NO_MOVE, 0.0);
     }
 
     // Random tiebreak ordering so equal positions don't repeat forever.
@@ -382,6 +395,7 @@ pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
     }
 
     let mut best_move = moves[0];
+    let mut best_score = 0.0f32;
     let mut scores = [0.0f32; 96];
     for depth in 1..=max_depth {
         let mut round_best = -WIN * 4.0;
@@ -411,6 +425,7 @@ pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
         let exhausted = ctx.nodes <= 0;
         if round_move != NO_MOVE && (!exhausted || round_best >= WIN) {
             best_move = round_move;
+            best_score = round_best;
         }
         if round_best >= WIN || exhausted {
             break;
@@ -436,7 +451,7 @@ pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
             break;
         }
     }
-    best_move
+    (best_move, best_score)
 }
 
 // ---------------------------------------------------------------------------
@@ -458,8 +473,11 @@ pub extern "C" fn set_seed(seed: u32) {
     unsafe { SEED = (seed as u64) << 16 | 0x9E37 }
 }
 
-#[no_mangle]
-pub extern "C" fn choose_move(max_depth: u32, node_budget: u32) -> u32 {
+/// Reads and validates the position from the input buffer. Board cells must
+/// be 0/1/2 with at most 4 pieces per side (this also bounds legal_moves
+/// well under its output buffer) — garbage is rejected rather than risking
+/// out-of-bounds panics.
+fn read_input() -> Option<State> {
     let buf = unsafe { &*core::ptr::addr_of!(IN_BUF) };
     let mut s = State {
         board: [0; 25],
@@ -468,20 +486,39 @@ pub extern "C" fn choose_move(max_depth: u32, node_budget: u32) -> u32 {
         turn: buf[27],
     };
     s.board.copy_from_slice(&buf[..25]);
-    // Reject garbage input rather than risking out-of-bounds panics. Board
-    // cells must be 0/1/2 with at most 4 pieces per side (this also bounds
-    // legal_moves well under its output buffer).
     if !(1..=3).contains(&s.cr) || !(1..=3).contains(&s.cc) || !(1..=2).contains(&s.turn) {
-        return NO_MOVE;
+        return None;
     }
     if s.board.iter().any(|&v| v > 2) || placed(&s, 1) > PIECES || placed(&s, 2) > PIECES {
-        return NO_MOVE;
+        return None;
     }
-    let seed = unsafe {
+    Some(s)
+}
+
+fn next_seed() -> u64 {
+    unsafe {
         SEED = SEED.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         SEED
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn choose_move(max_depth: u32, node_budget: u32) -> u32 {
+    let Some(s) = read_input() else {
+        return NO_MOVE;
     };
-    choose(&s, max_depth.min(8) as i32, node_budget as i64, seed)
+    choose(&s, max_depth.min(8) as i32, node_budget as i64, next_seed())
+}
+
+/// AlphaZero-style play: MCTS over the embedded RL policy/value net.
+/// Available in `rl`-feature builds (the "impossible" difficulty).
+#[cfg(feature = "rl")]
+#[no_mangle]
+pub extern "C" fn choose_move_mcts(sims: u32) -> u32 {
+    let Some(s) = read_input() else {
+        return NO_MOVE;
+    };
+    mcts_play::choose_mcts(&s, sims.clamp(16, 20_000), next_seed())
 }
 
 #[cfg(target_arch = "wasm32")]

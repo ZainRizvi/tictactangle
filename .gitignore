@@ -3,3 +3,6 @@ data/
 wasm/engine/target/
 wasm/engine/src/weights.rs
 wasm/engine/*.json
+rl/target/
+rl/models/
+rl/*.log

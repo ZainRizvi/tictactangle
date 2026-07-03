@@ -8,14 +8,17 @@ import { fileURLToPath } from 'node:url';
 import { newGame, applyMove, legalMoves, isLegal, idx, X, O } from '../js/domain/rules.js';
 import { createWasmEngine } from '../js/ai/wasm.js';
 
-for (const variant of ['medium', 'hard']) {
+for (const variant of ['medium', 'hard', 'impossible']) {
   const wasmPath = fileURLToPath(new URL(`../wasm/engine-${variant}.wasm`, import.meta.url));
   const bytes = await readFile(wasmPath).catch(() => null);
   const skip = bytes ? false : `wasm/engine-${variant}.wasm not built`;
   const t = (name, fn) => test(`[${variant}] ${name}`, { skip }, fn);
+  // impossible plays via MCTS; the alpha-beta opts don't apply to it
+  const mkOpts = (o) =>
+    variant === 'impossible' ? { mcts: o.fast ? 128 : 800, seed: o.seed } : o;
 
   t('plays only JS-legal moves across random playouts', async () => {
-    const engine = await createWasmEngine(bytes, { maxDepth: 2, nodeBudget: 20000, seed: 42 });
+    const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 2, nodeBudget: 20000, seed: 42, fast: true }));
     let checked = 0;
     for (let g = 0; g < 60; g++) {
       let s = newGame();
@@ -38,7 +41,7 @@ for (const variant of ['medium', 'hard']) {
   });
 
   t('takes an immediate win', async () => {
-    const engine = await createWasmEngine(bytes, { maxDepth: 4, nodeBudget: 200000, seed: 7 });
+    const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
     const s = newGame();
     s.board[idx(1, 1)] = X; s.board[idx(1, 2)] = X;
     s.board[idx(3, 1)] = O; s.board[idx(3, 2)] = O;
@@ -51,7 +54,7 @@ for (const variant of ['medium', 'hard']) {
   });
 
   t('blocks an immediate loss', async () => {
-    const engine = await createWasmEngine(bytes, { maxDepth: 4, nodeBudget: 200000, seed: 7 });
+    const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
     const s = newGame();
     // X threatens (1,3); O to move has no win of its own and must prevent an
     // immediate X win (block, slide the grid away, or equivalent).
@@ -72,7 +75,7 @@ for (const variant of ['medium', 'hard']) {
   });
 
   t('wins with a grid slide when that is the only win', async () => {
-    const engine = await createWasmEngine(bytes, { maxDepth: 4, nodeBudget: 200000, seed: 7 });
+    const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
     const s = newGame();
     // X row on board row 3 cols 1-3; grid at (1,2) excludes it. Only the slide
     // down to (2,2) lights all three at once. X has no reserve.
@@ -89,7 +92,7 @@ for (const variant of ['medium', 'hard']) {
   });
 
   t('wins with a piece move when placements are exhausted', async () => {
-    const engine = await createWasmEngine(bytes, { maxDepth: 4, nodeBudget: 200000, seed: 7 });
+    const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
     const s = newGame();
     // X: two on grid row 2, the third square empty; no reserve, no slide wins.
     s.board[idx(2, 1)] = X; s.board[idx(2, 2)] = X; s.board[idx(4, 4)] = X; s.board[idx(0, 0)] = X;
@@ -105,7 +108,7 @@ for (const variant of ['medium', 'hard']) {
   });
 
   t('rejects garbage input', async () => {
-    const engine = await createWasmEngine(bytes, { seed: 7 });
+    const engine = await createWasmEngine(bytes, mkOpts({ seed: 7 }));
     const s = newGame();
     s.center = { r: 9, c: 9 };
     assert.equal(await engine.chooseMove(s), null);

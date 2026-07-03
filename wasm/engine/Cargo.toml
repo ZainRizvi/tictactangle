@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Compiles the RL policy/value net + play-time MCTS (needs src/rlnet.bin).
+rl = []
+
 [profile.release]
 opt-level = 3
 lto = true

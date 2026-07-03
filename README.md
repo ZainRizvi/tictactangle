@@ -35,6 +35,13 @@ Two difficulty levels, each its own model generation:
   parameters) trained on ~110k positions of self-play by the *medium engine* — one more
   turn of the self-improvement crank — and searches to depth 8 (~500 ms). Against equal
   opposition it converts wins several plies sooner than medium.
+- **Impossible** (`engine-impossible.wasm`, ~477 KB): an AlphaZero-style player. A
+  policy+value network (~93k parameters) trained purely by reinforcement learning —
+  120 generations of MCTS self-play, no human or engine-labeled data (see `rl/`) —
+  playing through MCTS at inference, with an alpha-beta tactical layer that presses
+  and converts winning positions. In evaluation it has never lost a game from either
+  side (20/20 draws against hard's strongest settings) while matching hard's ability
+  to punish weaker opposition (10 wins, 0 losses vs a shallow engine).
 
 A note on measuring strength: the always-available revert slide is a powerful defensive
 resource, so games between strong engines gravitate toward long defensive shuffles.
@@ -66,11 +73,15 @@ js/
 └── main.js           Composition root — the only place layers are wired together.
 
 wasm/
-├── engine/           Rust crate: rules, negamax search, embedded value network.
-│   └── weights/      Generated weights modules, one per difficulty variant.
-├── engine-medium.wasm  Built artifacts served to the browser, one per difficulty
-├── engine-hard.wasm    (see wasm/build.sh <variant>).
-└── build.sh          cargo build --target wasm32-unknown-unknown + copy.
+├── engine/           Rust crate: rules, negamax search, embedded value network,
+│   │                 and (rl feature) MCTS + policy/value net for impossible.
+│   └── weights/      Generated weights modules, one per alpha-beta variant.
+├── engine-*.wasm     Built artifacts served to the browser, one per difficulty
+└── build.sh          (see wasm/build.sh <variant>).
+
+rl/                   AlphaZero-style training pipeline for the impossible AI:
+                      self-play MCTS + policy/value net + Adam + gating, native
+                      Rust, no ML dependencies (see rl/README.md).
 
 tools/                Training pipeline (Node, no dependencies):
 ├── gen-data.mjs      Noisy self-play generator → labeled positions.
