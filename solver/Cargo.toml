@@ -1,0 +1,24 @@
+[package]
+name = "tictactwo-solver"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "solver"
+path = "src/main.rs"
+
+[dependencies]
+# Read-only dependency on the game engine (rules, move gen, apply).
+tictactwo-engine = { path = "../wasm/engine" }
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# The engine crate is compiled no_std/panic=abort on wasm; host builds must
+# also use panic="abort" for both profiles so the rlib links (mirrors rl/).
+panic = "abort"
+
+[profile.dev]
+panic = "abort"

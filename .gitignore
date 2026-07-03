@@ -5,4 +5,9 @@ wasm/engine/src/weights.rs
 wasm/engine/*.json
 rl/target/
 rl/models/
+solver/target/
+solver/table.bin
+solver/table.bin.tmp
+solver/*.ckpt
+solver/*.log
 rl/*.log

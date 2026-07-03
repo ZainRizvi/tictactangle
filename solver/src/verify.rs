@@ -1,0 +1,258 @@
+//! Correctness self-tests.
+//!
+//! `verify` (no table needed): the index bijection, block sizes, and the
+//! canonical-form round trip. These validate the state space plumbing before
+//! committing to an ~870M-state solve.
+//!
+//! `check <table.bin>` (in check.rs): known hand positions and an alpha-beta
+//! cross-check, which require a solved table.
+
+use crate::canon::{center_code, Canon};
+use crate::index::{Indexer, BLOCKS, SQUARES};
+use tictactwo_engine::State;
+
+/// The empty starting position (center (2,2), X to move, no slide history).
+fn initial_state() -> State {
+    State {
+        board: [0; 25],
+        cr: 2,
+        cc: 2,
+        turn: 1,
+        ls_r: -1,
+        ls_c: -1,
+        bn_r: -1,
+        bn_c: -1,
+    }
+}
+
+/// A tiny deterministic RNG (xorshift64) so the sampling is reproducible.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+pub fn run() {
+    println!("=== solver self-tests ===\n");
+    let ix = Indexer::new();
+
+    // 1. Block sizes and total.
+    let mut acc = 0u64;
+    for (i, &(a, b)) in BLOCKS.iter().enumerate() {
+        let sz = ix.block_size(i);
+        assert_eq!(ix.block_base(i), acc, "block {} base", i);
+        acc += sz;
+        println!("  block {:?}: {:>12} states", (a, b), sz);
+    }
+    assert_eq!(acc, ix.total(), "sum of block sizes == total");
+    println!("  total: {} states\n", ix.total());
+
+    // 2. Index bijection: for each block, index(deindex(g)) == g for a sample
+    //    of local indices spanning the range, plus the endpoints.
+    println!("Index round-trip (per-block sampling)...");
+    let mut rng = Rng(0x1234_5678_9abc_def0);
+    for block in 0..BLOCKS.len() {
+        let base = ix.block_base(block);
+        let size = ix.block_size(block);
+        let samples = 20_000u64.min(size);
+        for s in 0..samples {
+            // spread: endpoints, then random.
+            let local = match s {
+                0 => 0,
+                1 => size - 1,
+                _ => rng.below(size),
+            };
+            let g = base + local;
+            let c = Canon::from_index(&ix, g);
+            let (na, nw) = (c.na, c.nw);
+            // masks disjoint and ascending
+            for w in 1..na {
+                assert!(c.active[w] > c.active[w - 1], "active ascending");
+            }
+            for w in 1..nw {
+                assert!(c.waiting[w] > c.waiting[w - 1], "waiting ascending");
+            }
+            for &pa in &c.active[..na] {
+                assert!(!c.waiting[..nw].contains(&pa), "masks disjoint");
+                assert!(pa < 25, "square in range");
+            }
+            let g2 = c.index(&ix);
+            assert_eq!(g2, g, "round trip block {} local {}", block, local);
+        }
+    }
+    println!("  OK\n");
+
+    // 3. Canonical from_state / to_state consistency for a few crafted states.
+    println!("Canon <-> State consistency...");
+    let ix = Indexer::new();
+    let mut count = 0;
+    // Build random legal-ish positions by placing pieces on distinct squares.
+    let mut rng = Rng(0xdead_beef_0000_0001);
+    for _ in 0..50_000 {
+        let (a, b) = BLOCKS[(rng.below(BLOCKS.len() as u64)) as usize];
+        let mut board = [0u8; 25];
+        let mut placed = 0u32;
+        let target = a + b;
+        // choose target distinct squares
+        while placed < target {
+            let sq = rng.below(25) as usize;
+            if board[sq] == 0 {
+                board[sq] = if placed < a { 1 } else { 2 };
+                placed += 1;
+            }
+        }
+        let center = center_code(
+            1 + rng.below(3) as i8,
+            1 + rng.below(3) as i8,
+        );
+        let (cr, cc) = crate::canon::center_decode(center);
+        // Random-but-consistent anti-loop slide state for slide-legal blocks:
+        // pick ls = a random in-bounds neighbor (or none), and ban = ls or none.
+        let (ls_r, ls_c, bn_r, bn_c) = if crate::index::slide_legal_block(a, b) && rng.below(2) == 1
+        {
+            // pick a random in-bounds neighbor direction
+            let dirs = crate::index::DIRS;
+            let mut valid = [(0i8, 0i8); 8];
+            let mut nk = 0;
+            for &(dr, dc) in &dirs {
+                if (1..=3).contains(&(cr + dr)) && (1..=3).contains(&(cc + dc)) {
+                    valid[nk] = (cr + dr, cc + dc);
+                    nk += 1;
+                }
+            }
+            let (lr, lc) = valid[rng.below(nk as u64) as usize];
+            if rng.below(2) == 1 {
+                (lr, lc, lr, lc) // ls and ban both this neighbor
+            } else {
+                (lr, lc, -1, -1) // ls only
+            }
+        } else {
+            (-1, -1, -1, -1)
+        };
+        let s = tictactwo_engine::State {
+            board,
+            cr,
+            cc,
+            turn: 1,
+            ls_r,
+            ls_c,
+            bn_r,
+            bn_c,
+        };
+        let c = Canon::from_state(&s).expect("valid counts");
+        let g = c.index(&ix);
+        let c2 = Canon::from_index(&ix, g);
+        assert_eq!(c, c2, "from_index(index(c)) == c");
+        // to_state must reproduce the board, center, and slide state.
+        let s2 = c2.to_state();
+        assert_eq!(s2.board, board, "board reproduced");
+        assert_eq!((s2.cr, s2.cc), (cr, cc), "center reproduced");
+        assert_eq!(
+            (s2.ls_r, s2.ls_c, s2.bn_r, s2.bn_c),
+            (ls_r, ls_c, bn_r, bn_c),
+            "slide state reproduced"
+        );
+        count += 1;
+    }
+    println!("  OK ({} random positions)\n", count);
+
+    // 3b. Reachability closure: from the initial position, play many random
+    //     games; EVERY to-move position and EVERY Undecided child of EVERY
+    //     legal move must canonicalize to a valid block. This is the invariant
+    //     the solver relies on (children never land outside the table) and it
+    //     directly guards against an incomplete BLOCKS set.
+    println!("Reachability closure (random playouts, all children in range)...");
+    let mut rng = Rng(0x0bad_c0de_face_1234);
+    let mut positions = 0u64;
+    let mut children = 0u64;
+    // Also assert the anti-loop invariant we rely on: whenever a slide arms a
+    // ban, the banned center equals the last-slide origin (so encoding ban==ls
+    // is complete). And ls/ban only ever appear in slide-legal positions.
+    for _ in 0..30_000 {
+        let mut s = initial_state();
+        for _ply in 0..80 {
+            // current to-move position must canonicalize
+            assert!(
+                Canon::from_state(&s).is_some(),
+                "unreachable to-move block for {:?} counts",
+                (
+                    s.board.iter().filter(|&&v| v == s.turn).count(),
+                    s.board.iter().filter(|&&v| v == 3 - s.turn).count()
+                )
+            );
+            positions += 1;
+            let mut moves = [0u32; 96];
+            let n = tictactwo_engine::legal_moves(&s, &mut moves);
+            if n == 0 {
+                break;
+            }
+            // every Undecided child must canonicalize AND survive an
+            // index round-trip reproducing its full engine state (board,
+            // center, and anti-loop slide fields). This is the real guarantee
+            // that (ls,ban) fully captures what the engine reads.
+            for &m in &moves[..n] {
+                let (ns, out) = tictactwo_engine::apply(&s, m);
+                if out == tictactwo_engine::Outcome::Undecided {
+                    let c = Canon::from_state(&ns).unwrap_or_else(|| {
+                        panic!(
+                            "undecided child out of range: counts {:?}",
+                            (
+                                ns.board.iter().filter(|&&v| v == ns.turn).count(),
+                                ns.board.iter().filter(|&&v| v == 3 - ns.turn).count()
+                            )
+                        )
+                    });
+                    // ban, when armed, must equal ls (encoding relies on this).
+                    if c.ss.ban.is_some() {
+                        assert_eq!(c.ss.ban, c.ss.ls, "ban must equal ls");
+                    }
+                    let g = c.index(&ix);
+                    let back = Canon::from_index(&ix, g).to_state();
+                    // Compare against a canonicalized (active=X) view of ns.
+                    let cns = c.to_state();
+                    assert_eq!(back.board, cns.board, "child board round-trip");
+                    assert_eq!((back.cr, back.cc), (cns.cr, cns.cc), "child center");
+                    assert_eq!(
+                        (back.ls_r, back.ls_c, back.bn_r, back.bn_c),
+                        (cns.ls_r, cns.ls_c, cns.bn_r, cns.bn_c),
+                        "child slide-state round-trip"
+                    );
+                    children += 1;
+                }
+            }
+            // advance by a random move
+            let m = moves[rng.below(n as u64) as usize];
+            let (ns, out) = tictactwo_engine::apply(&s, m);
+            if out != tictactwo_engine::Outcome::Undecided {
+                break;
+            }
+            s = ns;
+        }
+    }
+    println!(
+        "  OK ({} positions, {} children all in range)\n",
+        positions, children
+    );
+
+    // 4. Sanity: the initial position lands in block (0,0) at a well-defined
+    //    global index within range.
+    let init = initial_state();
+    let ic = Canon::from_state(&init).unwrap();
+    let g = ic.index(&ix);
+    assert!(g < ix.total(), "initial index in range");
+    // block (0,0) is first; center code for (2,2) is 4.
+    assert_eq!(g, 4, "initial position index == center code 4");
+    println!("Initial position index = {} (center code 4) OK", g);
+
+    let _ = SQUARES;
+    println!("\n=== all structural self-tests passed ===");
+}
