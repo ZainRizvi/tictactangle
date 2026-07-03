@@ -20,7 +20,11 @@ Played on a 5×5 board with a movable 3×3 grid (the "spotlight"). Each player h
   undos, and clears as soon as they make any non-undo move. The undo itself is always
   legal. (Kills rotating shuffles like A→B→A→C→A→B, not just the two-cycle.)
 
-Two modes: local two-player, or versus an AI opponent that runs entirely in your browser.
+Three modes: local two-player, versus an AI opponent that runs entirely in your browser,
+or an AI-vs-AI spectator mode where you pick each side's difficulty and watch the series
+unfold (games are paced to be watchable; drawn-out shuffles are adjudicated after 100
+moves and the next game starts automatically). A series tally tracks X wins, O wins, and
+ties across games; it resets whenever any game setting changes.
 
 ## The AI
 

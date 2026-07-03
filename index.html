@@ -48,8 +48,9 @@
     <aside class="panel">
       <div class="card">
         <div class="mode-switch" role="group" aria-label="Game mode">
-          <button class="mode-btn is-active" id="modePvp" data-mode="pvp" aria-pressed="true">2 players</button>
+          <button class="mode-btn is-active" id="modePvp" data-mode="pvp" aria-pressed="true">2P</button>
           <button class="mode-btn" id="modeAi" data-mode="ai" aria-pressed="false">vs AI</button>
+          <button class="mode-btn" id="modeAivai" data-mode="aivai" aria-pressed="false">AI vs AI</button>
         </div>
         <div class="side-picker" id="sidePicker" hidden>
           <span class="side-label">you play</span>
@@ -67,6 +68,35 @@
             <button class="diff-btn" id="diffImpossible" data-difficulty="impossible" aria-pressed="false">imposs.</button>
           </div>
         </div>
+        <div class="side-picker difficulty-picker" id="diffXPicker" hidden>
+          <span class="side-label rl-x">X ai</span>
+          <div class="side-btns diff-row" role="group" aria-label="X AI difficulty">
+            <button class="diff-btn" data-difficulty="easy" aria-pressed="false">easy</button>
+            <button class="diff-btn is-active" data-difficulty="medium" aria-pressed="true">med</button>
+            <button class="diff-btn" data-difficulty="hard" aria-pressed="false">hard</button>
+            <button class="diff-btn" data-difficulty="impossible" aria-pressed="false">imposs.</button>
+          </div>
+        </div>
+        <div class="side-picker difficulty-picker" id="diffOPicker" hidden>
+          <span class="side-label rl-o">O ai</span>
+          <div class="side-btns diff-row" role="group" aria-label="O AI difficulty">
+            <button class="diff-btn" data-difficulty="easy" aria-pressed="false">easy</button>
+            <button class="diff-btn is-active" data-difficulty="medium" aria-pressed="true">med</button>
+            <button class="diff-btn" data-difficulty="hard" aria-pressed="false">hard</button>
+            <button class="diff-btn" data-difficulty="impossible" aria-pressed="false">imposs.</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card tally" role="group" aria-label="Series tally" aria-live="off">
+        <span class="tally-label">series</span>
+        <span class="tally-score">
+          <span class="rl-x">X</span> <b id="tallyX">0</b>
+          <span class="tally-sep">·</span>
+          <b id="tallyO">0</b> <span class="rl-o">O</span>
+          <span class="tally-sep">·</span>
+          <b id="tallyTies">0</b> <span class="tally-ties-label">ties</span>
+        </span>
       </div>
 
       <div class="card turn-card" id="turnCard">

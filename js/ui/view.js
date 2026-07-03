@@ -16,8 +16,9 @@ function svgFor(p) {
 
 /**
  * @param {{ session: import('../app/session.js').GameSession,
- *           configureSeats: (mode: 'pvp'|'ai', humanSide: number,
- *                            difficulty: 'medium'|'hard') => void }} deps
+ *           configureSeats: (config: { mode: 'pvp'|'ai'|'aivai',
+ *             humanSide?: number, difficulty?: string,
+ *             diffX?: string, diffO?: string }) => void }} deps
  */
 export function mountDomView({ session, configureSeats }) {
   const $ = (id) => document.getElementById(id);
@@ -40,7 +41,42 @@ export function mountDomView({ session, configureSeats }) {
   let destination = null; // board index of a chosen empty lit cell (destination-first move)
   let mode = 'pvp';
   let humanSide = rules.X;
-  let difficulty = 'medium';
+  let difficulty = 'medium'; // vs-AI opponent
+  let diffX = 'medium'; // AI-vs-AI seats
+  let diffO = 'medium';
+  // series tally; resets whenever any game setting changes
+  const tally = { x: 0, o: 0, ties: 0 };
+  let tallyCounted = false; // current game already counted
+  let restartTimer = null; // AI-vs-AI auto-restart
+
+  function currentConfig() {
+    return { mode, humanSide, difficulty, diffX, diffO };
+  }
+
+  function cancelAutoRestart() {
+    if (restartTimer !== null) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
+  }
+
+  function resetTally() {
+    tally.x = 0;
+    tally.o = 0;
+    tally.ties = 0;
+    // The old game may still be pumping while the new configuration loads
+    // engines; marking it "already counted" keeps its result (and its
+    // auto-restart timer) out of the fresh series. The new game's ply-0
+    // snapshot flips this back to false.
+    tallyCounted = true;
+  }
+
+  function applySettingsChange() {
+    cancelAutoRestart();
+    resetTally();
+    configureSeats(currentConfig());
+    renderTally();
+  }
 
   // ---------- board construction ----------
 
@@ -65,8 +101,9 @@ export function mountDomView({ session, configureSeats }) {
 
   // Derived from the snapshot (not the live session) so the view stays a pure
   // function of what it was last told.
+  const gameOver = () => snap.state.result !== null || snap.adjudicatedDraw;
   const interactive = () =>
-    !snap.state.result && snap.busySeat === null && snap.seats[snap.state.turn] === null;
+    !gameOver() && snap.busySeat === null && snap.seats[snap.state.turn] === null;
 
   function onCell(i) {
     if (!interactive()) return;
@@ -232,7 +269,7 @@ export function mountDomView({ session, configureSeats }) {
 
     const name = s.turn === rules.X ? 'X' : 'O';
     const aiSeated = snap.seats[rules.X] || snap.seats[rules.O];
-    if (s.result) {
+    if (gameOver()) {
       turnLabelEl.textContent = 'game over';
     } else if (aiSeated) {
       turnLabelEl.textContent = snap.seats[s.turn] ? `${name} to move — AI` : `${name} to move — you`;
@@ -240,7 +277,7 @@ export function mountDomView({ session, configureSeats }) {
       turnLabelEl.textContent = `${name} to move`;
     }
 
-    phaseLabelEl.textContent = s.result
+    phaseLabelEl.textContent = gameOver()
       ? 'the light settles'
       : unlocked
         ? 'open play'
@@ -248,12 +285,14 @@ export function mountDomView({ session, configureSeats }) {
 
     renderChips(chipsXEl, rules.X);
     renderChips(chipsOEl, rules.O);
+    renderTally();
 
-    if (s.result) {
+    if (gameOver()) {
       // Announced here too: the endgame overlay is revealed while hidden,
       // which screen readers don't reliably read.
-      hintEl.textContent =
-        s.result.type === 'tie'
+      hintEl.textContent = !s.result
+        ? `dead heat — adjudicated after ${snap.plyCap} moves`
+        : s.result.type === 'tie'
           ? 'dead heat — one slide lit up both lines'
           : `${s.result.winner === rules.X ? 'X' : 'O'} wins`;
     } else if (snap.seatFault !== null) {
@@ -285,15 +324,27 @@ export function mountDomView({ session, configureSeats }) {
     container.innerHTML = html;
   }
 
+  function renderTally() {
+    $('tallyX').textContent = tally.x;
+    $('tallyO').textContent = tally.o;
+    $('tallyTies').textContent = tally.ties;
+  }
+
   function renderEndgame() {
     const s = snap.state;
-    if (!s.result) {
+    if (!gameOver()) {
       endgameEl.hidden = true;
       return;
     }
     const wasHidden = endgameEl.hidden;
     endTitleEl.className = 'endgame-title';
-    if (s.result.type === 'tie') {
+    const spectating = mode === 'aivai';
+    if (!s.result) {
+      // ply-cap adjudication (spectator mode only)
+      endTitleEl.classList.add('tie');
+      endTitleEl.textContent = 'DEAD HEAT';
+      endSubEl.textContent = `adjudicated after ${snap.plyCap} moves — next game in a moment…`;
+    } else if (s.result.type === 'tie') {
       endTitleEl.classList.add('tie');
       endTitleEl.textContent = 'DEAD HEAT';
       endSubEl.textContent = 'one slide lit up both lines';
@@ -302,22 +353,30 @@ export function mountDomView({ session, configureSeats }) {
       endTitleEl.classList.add(winner === rules.X ? 'win-x' : 'win-o');
       endTitleEl.textContent = winner === rules.X ? 'X WINS' : 'O WINS';
       const aiSeated = snap.seats[rules.X] || snap.seats[rules.O];
-      if (aiSeated) {
+      if (spectating) {
+        endSubEl.textContent = 'next game in a moment…';
+      } else if (aiSeated) {
         endSubEl.textContent = snap.seats[winner] ? 'outplayed by the machine' : 'the grid bends to your will';
       } else {
         endSubEl.textContent = 'three in the light';
       }
     }
     endgameEl.hidden = false;
-    if (wasHidden) requestAnimationFrame(() => $('againBtn').focus());
+    if (wasHidden && !spectating) requestAnimationFrame(() => $('againBtn').focus());
   }
 
   // ---------- controls ----------
 
-  $('newGameBtn').addEventListener('click', () => session.newGame());
-  $('againBtn').addEventListener('click', () => session.newGame());
+  $('newGameBtn').addEventListener('click', () => {
+    cancelAutoRestart();
+    session.newGame();
+  });
+  $('againBtn').addEventListener('click', () => {
+    cancelAutoRestart();
+    session.newGame();
+  });
 
-  const modeBtns = [$('modePvp'), $('modeAi')];
+  const modeBtns = [$('modePvp'), $('modeAi'), $('modeAivai')];
   for (const btn of modeBtns) {
     btn.addEventListener('click', () => {
       if (mode === btn.dataset.mode) return;
@@ -328,7 +387,9 @@ export function mountDomView({ session, configureSeats }) {
       }
       $('sidePicker').hidden = mode !== 'ai';
       $('difficultyPicker').hidden = mode !== 'ai';
-      configureSeats(mode, humanSide, difficulty);
+      $('diffXPicker').hidden = mode !== 'aivai';
+      $('diffOPicker').hidden = mode !== 'aivai';
+      applySettingsChange();
     });
   }
 
@@ -344,22 +405,37 @@ export function mountDomView({ session, configureSeats }) {
         b.classList.toggle('is-active', b === btn);
         b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
       }
-      if (mode === 'ai') configureSeats(mode, humanSide, difficulty);
+      if (mode === 'ai') applySettingsChange();
     });
   }
 
-  const diffBtns = [$('diffEasy'), $('diffMedium'), $('diffHard'), $('diffImpossible')];
-  for (const btn of diffBtns) {
-    btn.addEventListener('click', () => {
-      if (difficulty === btn.dataset.difficulty) return;
-      difficulty = btn.dataset.difficulty;
-      for (const b of diffBtns) {
-        b.classList.toggle('is-active', b === btn);
-        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
-      }
-      if (mode === 'ai') configureSeats(mode, humanSide, difficulty);
-    });
+  /** Wires one difficulty button row; onPick(value) fires on change. */
+  function wireDifficultyRow(container, current, onPick) {
+    const btns = [...container.querySelectorAll('.diff-btn')];
+    for (const btn of btns) {
+      btn.addEventListener('click', () => {
+        if (current() === btn.dataset.difficulty) return;
+        for (const b of btns) {
+          b.classList.toggle('is-active', b === btn);
+          b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+        }
+        onPick(btn.dataset.difficulty);
+      });
+    }
   }
+
+  wireDifficultyRow($('difficultyPicker'), () => difficulty, (d) => {
+    difficulty = d;
+    if (mode === 'ai') applySettingsChange();
+  });
+  wireDifficultyRow($('diffXPicker'), () => diffX, (d) => {
+    diffX = d;
+    if (mode === 'aivai') applySettingsChange();
+  });
+  wireDifficultyRow($('diffOPicker'), () => diffO, (d) => {
+    diffO = d;
+    if (mode === 'aivai') applySettingsChange();
+  });
 
   $('rulesBtn').addEventListener('click', () => rulesDialog.showModal());
   $('rulesCloseBtn').addEventListener('click', () => rulesDialog.close());
@@ -384,7 +460,31 @@ export function mountDomView({ session, configureSeats }) {
       lastState = s.state;
       selected = null; // any state change invalidates the selections
       destination = null;
+      if (s.state.ply === 0) {
+        tallyCounted = false; // fresh game
+        cancelAutoRestart(); // belt-and-braces against stale timers
+      }
     }
+
+    // Count each finished game into the series tally exactly once.
+    const over = s.state.result !== null || s.adjudicatedDraw;
+    if (over && !tallyCounted) {
+      tallyCounted = true;
+      if (s.state.result?.type === 'win') {
+        if (s.state.result.winner === rules.X) tally.x++;
+        else tally.o++;
+      } else {
+        tally.ties++;
+      }
+      // Spectator mode rolls straight into the next game.
+      if (mode === 'aivai' && restartTimer === null) {
+        restartTimer = setTimeout(() => {
+          restartTimer = null;
+          session.newGame();
+        }, 3000);
+      }
+    }
+
     render();
   });
 }

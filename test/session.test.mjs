@@ -90,6 +90,28 @@ test('setSeats drops in-flight controller moves and clears faults', async () => 
   assert.equal(session.busySeat, null);
 });
 
+test('ply cap adjudicates a draw and stops the pumping', async () => {
+  const scripted = {
+    async chooseMove(state) {
+      // Always slide back and forth where legal, else first legal move.
+      return legalMoves(state)[legalMoves(state).length - 1];
+    },
+  };
+  const session = new GameSession({ [X]: scripted, [O]: scripted });
+  session.plyCap = 6;
+  session.newGame();
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(session.adjudicatedDraw, true);
+  assert.equal(session.state.ply, 6);
+  assert.equal(session.state.result, null);
+  assert.equal(session.canAct(), false);
+  assert.equal(session.snapshot().adjudicatedDraw, true);
+  session.newGame(); // reset clears the adjudication
+  assert.equal(session.adjudicatedDraw, false);
+  session.plyCap = null; // stop the scripted seats for test teardown
+  session.setSeats({ [X]: null, [O]: null });
+});
+
 test('stale controller results are dropped after newGame', async () => {
   let resolveMove;
   const slow = { chooseMove: () => new Promise((r) => { resolveMove = r; }) };

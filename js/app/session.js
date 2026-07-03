@@ -16,6 +16,8 @@ export class GameSession {
     this.lastMove = null;
     this.busySeat = null; // seat whose controller is currently thinking
     this.seatFault = null; // seat whose controller failed or stalled
+    this.plyCap = null; // adjudicate a draw at this many plies (null = never)
+    this.adjudicatedDraw = false; // game stopped by the ply cap
     this._listeners = new Set();
     this._token = 0;
   }
@@ -38,13 +40,20 @@ export class GameSession {
       lastMove: this.lastMove,
       busySeat: this.busySeat,
       seatFault: this.seatFault,
+      adjudicatedDraw: this.adjudicatedDraw,
+      plyCap: this.plyCap,
       seats: this.seats,
     };
   }
 
+  /** True when the game has ended for any reason (win, tie, or ply cap). */
+  isOver() {
+    return this.state.result !== null || this.adjudicatedDraw;
+  }
+
   /** True when the seat to move is a local human free to act. */
   canAct() {
-    return !this.state.result && this.busySeat === null && this.seats[this.state.turn] === null;
+    return !this.isOver() && this.busySeat === null && this.seats[this.state.turn] === null;
   }
 
   /** Replace seat controllers and start a fresh game. */
@@ -59,6 +68,7 @@ export class GameSession {
     this.lastMove = null;
     this.busySeat = null;
     this.seatFault = null;
+    this.adjudicatedDraw = false;
     this._emit();
     this._pump();
   }
@@ -88,6 +98,11 @@ export class GameSession {
   _apply(move) {
     this.state = rules.applyMove(this.state, move);
     this.lastMove = move;
+    // Spectated games could shuffle forever under official rules; the ply
+    // cap adjudicates a dead heat so a series can continue.
+    if (!this.state.result && this.plyCap !== null && this.state.ply >= this.plyCap) {
+      this.adjudicatedDraw = true;
+    }
     this._emit();
     this._pump();
   }
@@ -95,7 +110,7 @@ export class GameSession {
   /** If the seat to move has a controller, ask it for a move. */
   async _pump() {
     const controller = this.seats[this.state.turn];
-    if (!controller || this.state.result) return;
+    if (!controller || this.isOver()) return;
 
     this.busySeat = this.state.turn;
     const token = ++this._token;
