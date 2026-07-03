@@ -34,6 +34,10 @@ export async function createWasmEngine(source, opts = {}) {
       buf[25] = state.center.r;
       buf[26] = state.center.c;
       buf[27] = state.turn;
+      buf[28] = state.lastSlideFrom?.r ?? 0;
+      buf[29] = state.lastSlideFrom?.c ?? 0;
+      buf[30] = state.bannedSlideTo?.r ?? 0;
+      buf[31] = state.bannedSlideTo?.c ?? 0;
       const packed =
         (mctsSims > 0 ? choose_move_mcts(mctsSims) : choose_move(maxDepth, nodeBudget)) >>> 0;
       if (packed === NO_MOVE) return null;

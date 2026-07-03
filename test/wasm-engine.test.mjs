@@ -91,6 +91,25 @@ for (const variant of ['medium', 'hard', 'impossible']) {
     assert.equal(n.result.winner, X);
   });
 
+  t('honors the anti-loop ban even when repeating the slide would win', async () => {
+    const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
+    const s = newGame();
+    // The grid-slide-win position, but X's winning slide (1,2) → (2,2) was
+    // just undone by O ((2,2) → (1,2)), so repeating it is banned this turn.
+    s.board[idx(3, 1)] = X; s.board[idx(3, 2)] = X; s.board[idx(3, 3)] = X; s.board[idx(0, 0)] = X;
+    s.board[idx(0, 2)] = O; s.board[idx(0, 3)] = O; s.board[idx(4, 0)] = O; s.board[idx(4, 4)] = O;
+    s.placed[X] = 4; s.placed[O] = 4;
+    s.reserve[X] = 0; s.reserve[O] = 0;
+    s.center = { r: 1, c: 2 };
+    s.lastSlideFrom = { r: 2, c: 2 }; // O's undo slid (2,2) → (1,2)
+    s.bannedSlideTo = { r: 2, c: 2 };
+    const move = await engine.chooseMove(s);
+    assert.ok(isLegal(s, move), `illegal move ${JSON.stringify(move)}`);
+    const landsOnBanned =
+      move.type === 'grid' && s.center.r + move.dr === 2 && s.center.c + move.dc === 2;
+    assert.equal(landsOnBanned, false);
+  });
+
   t('wins with a piece move when placements are exhausted', async () => {
     const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
     const s = newGame();

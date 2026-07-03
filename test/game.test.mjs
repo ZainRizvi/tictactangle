@@ -149,6 +149,63 @@ test('the reply may slide the grid straight back (official rules)', () => {
   assert.ok(isLegal(s, { type: 'grid', dr: -1, dc: 0 })); // O may revert
 });
 
+test('anti-loop: an undone slide may not be immediately repeated', () => {
+  let s = newGame();
+  s = applyMove(s, { type: 'place', to: idx(1, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(1, 2) }); // O
+  s = applyMove(s, { type: 'place', to: idx(2, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(2, 2) }); // O
+  s = applyMove(s, { type: 'grid', dr: 1, dc: 0 }); // X slides A(2,2) → B(3,2)
+  assert.deepEqual(s.lastSlideFrom, { r: 2, c: 2 });
+  assert.equal(s.bannedSlideTo, null);
+  // O's undo B → A is itself legal...
+  assert.ok(isLegal(s, { type: 'grid', dr: -1, dc: 0 }));
+  s = applyMove(s, { type: 'grid', dr: -1, dc: 0 }); // O undoes: center back to A
+  // ...and bans X (only) from re-creating B this turn.
+  assert.deepEqual(s.bannedSlideTo, { r: 3, c: 2 });
+  assert.ok(!isLegal(s, { type: 'grid', dr: 1, dc: 0 }));
+  // Every other slide, placement, and piece move stays available.
+  assert.ok(isLegal(s, { type: 'grid', dr: 0, dc: 1 }));
+  assert.ok(isLegal(s, { type: 'grid', dr: -1, dc: 0 }));
+  assert.ok(isLegal(s, { type: 'place', to: idx(3, 3) }));
+  assert.ok(isLegal(s, { type: 'move', from: idx(1, 1), to: idx(3, 3) }));
+  // After X plays something else the ban evaporates.
+  s = applyMove(s, { type: 'place', to: idx(3, 3) }); // X places instead
+  assert.equal(s.bannedSlideTo, null);
+  assert.equal(s.lastSlideFrom, null);
+  s = applyMove(s, { type: 'place', to: idx(1, 3) }); // O
+  assert.ok(isLegal(s, { type: 'grid', dr: 1, dc: 0 })); // X may slide A → B again
+});
+
+test('anti-loop: a non-undo reply slide arms no ban, and bans chain naturally', () => {
+  let s = newGame();
+  s = applyMove(s, { type: 'place', to: idx(1, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(1, 2) }); // O
+  s = applyMove(s, { type: 'place', to: idx(2, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(2, 2) }); // O
+  s = applyMove(s, { type: 'grid', dr: 1, dc: 0 }); // X: A(2,2) → B(3,2)
+  s = applyMove(s, { type: 'grid', dr: 0, dc: 1 }); // O: B → (3,3) — not an undo
+  assert.equal(s.bannedSlideTo, null);
+  assert.deepEqual(s.lastSlideFrom, { r: 3, c: 2 });
+
+  // Chain: X's A→B gets undone, X slides A→C instead, that gets undone too —
+  // now A→C is banned and A→B is available again.
+  s = newGame();
+  s = applyMove(s, { type: 'place', to: idx(1, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(1, 2) }); // O
+  s = applyMove(s, { type: 'place', to: idx(2, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(2, 2) }); // O
+  s = applyMove(s, { type: 'grid', dr: 1, dc: 0 }); // X: A(2,2) → B(3,2)
+  s = applyMove(s, { type: 'grid', dr: -1, dc: 0 }); // O undoes: B → A
+  assert.ok(!isLegal(s, { type: 'grid', dr: 1, dc: 0 })); // A → B banned
+  s = applyMove(s, { type: 'grid', dr: 0, dc: 1 }); // X: A → C(2,3) instead
+  assert.equal(s.bannedSlideTo, null); // X's dodge is no undo: O faces no ban
+  s = applyMove(s, { type: 'grid', dr: 0, dc: -1 }); // O undoes: C → A
+  assert.deepEqual(s.bannedSlideTo, { r: 2, c: 3 });
+  assert.ok(!isLegal(s, { type: 'grid', dr: 0, dc: 1 })); // A → C now banned
+  assert.ok(isLegal(s, { type: 'grid', dr: 1, dc: 0 })); // A → B available again
+});
+
 test('grid cannot slide off the board', () => {
   let s = newGame();
   s = applyMove(s, { type: 'place', to: idx(1, 1) });

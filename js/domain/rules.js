@@ -6,6 +6,9 @@
 // anywhere on the board) to an empty cell inside the grid.
 // First player with 3-in-a-row of their pieces inside the grid wins; a grid
 // slide that produces a line for both players at once is a tie.
+// Anti-loop: if your grid slide is undone by the opponent's reply slide, you
+// may not immediately repeat it. Any other move is allowed, and the ban
+// lasts only that one turn. The undo itself is always legal.
 
 export const EMPTY = 0;
 export const X = 1;
@@ -32,6 +35,8 @@ export function newGame() {
     reserve: { [X]: PIECES, [O]: PIECES },
     placed: { [X]: 0, [O]: 0 },
     ply: 0,
+    lastSlideFrom: null, // {r,c} origin of the last move iff it was a slide
+    bannedSlideTo: null, // {r,c} the side to move may not slide here this turn
     result: null, // {type:'win', winner, line} | {type:'tie', xLine, oLine}
   };
 }
@@ -44,6 +49,8 @@ export function cloneState(s) {
     reserve: { [X]: s.reserve[X], [O]: s.reserve[O] },
     placed: { [X]: s.placed[X], [O]: s.placed[O] },
     ply: s.ply,
+    lastSlideFrom: s.lastSlideFrom ? { r: s.lastSlideFrom.r, c: s.lastSlideFrom.c } : null,
+    bannedSlideTo: s.bannedSlideTo ? { r: s.bannedSlideTo.r, c: s.bannedSlideTo.c } : null,
     result: s.result,
   };
 }
@@ -75,7 +82,10 @@ export const DIRS = [
 export function gridMoveValid(s, dr, dc) {
   const nr = s.center.r + dr;
   const nc = s.center.c + dc;
-  return nr >= CENTER_MIN && nr <= CENTER_MAX && nc >= CENTER_MIN && nc <= CENTER_MAX;
+  if (nr < CENTER_MIN || nr > CENTER_MAX || nc < CENTER_MIN || nc > CENTER_MAX) return false;
+  // Anti-loop: may not repeat the slide the opponent just undid.
+  if (s.bannedSlideTo && nr === s.bannedSlideTo.r && nc === s.bannedSlideTo.c) return false;
+  return true;
 }
 
 export function legalMoves(s) {
@@ -133,6 +143,19 @@ export function applyMove(s, m) {
     n.board[m.from] = EMPTY;
     n.board[m.to] = n.turn;
   }
+  // Anti-loop bookkeeping. A slide whose destination equals lastSlideFrom is
+  // necessarily an exact undo of the previous slide: slides are one step, the
+  // previous slide went lastSlideFrom -> s.center, and this slide starts from
+  // s.center — so matching destinations means matching (reversed) endpoints.
+  // An undo bans the side now to move from re-creating the undone center
+  // (s.center) on this one turn; any other move leaves no ban.
+  const undid =
+    m.type === 'grid' &&
+    s.lastSlideFrom &&
+    n.center.r === s.lastSlideFrom.r &&
+    n.center.c === s.lastSlideFrom.c;
+  n.bannedSlideTo = undid ? { r: s.center.r, c: s.center.c } : null;
+  n.lastSlideFrom = m.type === 'grid' ? { r: s.center.r, c: s.center.c } : null;
   n.ply++;
 
   // A tie can only arise from a grid slide (a placement or piece move never

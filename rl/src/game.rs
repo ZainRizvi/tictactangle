@@ -71,5 +71,9 @@ pub fn initial_state() -> State {
         cr: 2,
         cc: 2,
         turn: 1,
+        ls_r: -1,
+        ls_c: -1,
+        bn_r: -1,
+        bn_c: -1,
     }
 }
