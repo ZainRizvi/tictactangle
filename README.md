@@ -15,8 +15,6 @@ Played on a 5×5 board with a movable 3×3 grid (the "spotlight"). Each player h
   - **Move** one of your pieces — from anywhere on the board — to an empty lit cell.
 - First player with three-in-a-row of their own pieces *inside the lit grid* wins. Pieces outside the light don't count.
 - If a grid slide lights up three-in-a-row for both players at once, the game is a tie.
-- No take-backs: immediately after a slide, the reply may not slide the grid straight
-  back to the position it just left (house rule — prevents immediate back-and-forth shuffling).
 
 Two modes: local two-player, or versus an AI opponent that runs entirely in your browser.
 
@@ -29,19 +27,20 @@ the WASM module; a pure-JS alpha-beta engine serves as fallback when WASM is una
 
 Two difficulty levels, each its own model generation:
 
-- **Medium** (`engine-medium.wasm`, ~36 KB): 61→64→32→1 net (~6k parameters) trained on
-  ~143k positions of noisy self-play by the JS engine; searches to depth 6 (~150 ms).
+- **Medium** (`engine-medium.wasm`, ~37 KB): 61→64→32→1 net (~6k parameters) trained on
+  ~146k positions of noisy self-play by the JS engine; searches to depth 6 (~150 ms).
   Its evaluator beats both the JS engine and a handcrafted evaluation under identical
   search.
 - **Hard** (`engine-hard.wasm`, ~76 KB): second-generation 61→128→64→1 net (~16k
-  parameters) trained on ~85k positions of self-play by the *medium engine* — one more
+  parameters) trained on ~110k positions of self-play by the *medium engine* — one more
   turn of the self-improvement crank — and searches to depth 8 (~500 ms). Against equal
-  opposition it converts wins about four plies sooner than medium.
+  opposition it converts wins several plies sooner than medium.
 
-A note on measuring strength: Tic Tac Two with the no-take-backs rule is a heavily
-first-player-favored game, so head-to-head matches between strong engines are decided
-almost entirely by who moves first. Depth of punishment — how quickly an engine
-capitalizes on inaccuracies — is where the difficulty levels differ in practice.
+A note on measuring strength: the always-available revert slide is a powerful defensive
+resource, so games between strong engines gravitate toward long defensive shuffles.
+Head-to-head records between strong engines therefore say little — depth of punishment
+(how quickly an engine capitalizes on inaccuracies) is where the difficulty levels
+differ in practice.
 
 ## Architecture
 
