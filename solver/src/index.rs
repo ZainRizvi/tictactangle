@@ -49,25 +49,6 @@ pub const BLOCKS: [(u32, u32); NBLOCKS] = [
 pub const CENTERS: u64 = 9;
 pub const SQUARES: usize = 25;
 
-/// The 8 slide directions, in a fixed order (matches the engine's DIRS).
-pub const DIRS: [(i8, i8); 8] = [
-    (-1, -1),
-    (-1, 0),
-    (-1, 1),
-    (0, -1),
-    (0, 1),
-    (1, -1),
-    (1, 0),
-    (1, 1),
-];
-
-/// True if a count block can have slides (and therefore a slide-ban): both
-/// players have >=2 pieces, matching the engine's actions_unlocked.
-#[inline]
-pub fn slide_legal_block(a: u32, b: u32) -> bool {
-    a >= 2 && b >= 2
-}
-
 /// Decode center code 0..9 to (cr, cc), each 1..3.
 #[inline]
 pub fn center_rc(code: u32) -> (i8, i8) {
@@ -80,160 +61,6 @@ pub fn center_code_rc(cr: i8, cc: i8) -> u32 {
     ((cr - 1) * 3 + (cc - 1)) as u32
 }
 
-/// The complete anti-loop slide history a to-move position carries, on top of
-/// its board+center, for slide-legal blocks. Two fields matter:
-///   - `ls` (last-slide origin): the center the grid occupied *before* the
-///     opponent's last move, iff that move was a slide (else none). It decides
-///     whether the current player's slide will count as an "undo".
-///   - `ban`: the one center the current player may not slide to this turn,
-///     armed only when the opponent's last move undid the player's own slide.
-///
-/// From the rule's `apply`, a ban is only ever set to the same center as `ls`
-/// (the undone center), so the reachable combined states per center are:
-///   code 0                : ls = none, ban = none
-///   code 1 + 2*i          : ls = neighbor_i, ban = none
-///   code 1 + 2*i + 1      : ls = neighbor_i, ban = neighbor_i (that slide banned)
-/// where neighbor_i ranges over the k in-bounds slide neighbors of the center
-/// (in DIRS order). This packs to 89 combos across the 9 centers.
-///
-/// `ls` is always an in-bounds neighbor of the current center because a slide is
-/// one step: the grid moved from `ls` to the current center in that last slide.
-pub struct SlideStateTable {
-    /// Number of (center, ls, ban) combos summed over all centers = 89.
-    total_cb: u64,
-    /// cb_base[center] = first combined index for that center.
-    cb_base: [u32; 9],
-    /// For each center, the number of combined states (1 + 2k).
-    cb_states: [u32; 9],
-    /// For each center, the DIRS index of the i-th in-bounds neighbor; -1 pad.
-    nbr_dir: [[i8; 8]; 9],
-    /// For each center, its number of in-bounds neighbors (k).
-    nbr_count: [u32; 9],
-}
-
-/// Decoded anti-loop slide state for a to-move position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SlideState {
-    /// Last-slide origin center code, or None.
-    pub ls: Option<u32>,
-    /// Banned slide-target center code, or None (always == ls when Some).
-    pub ban: Option<u32>,
-}
-
-impl SlideStateTable {
-    pub fn new() -> Self {
-        let mut cb_base = [0u32; 9];
-        let mut cb_states = [0u32; 9];
-        let mut nbr_dir = [[-1i8; 8]; 9];
-        let mut nbr_count = [0u32; 9];
-        let mut acc = 0u32;
-        for code in 0..9u32 {
-            let (cr, cc) = center_rc(code);
-            cb_base[code as usize] = acc;
-            let mut k = 0usize;
-            for (di, &(dr, dc)) in DIRS.iter().enumerate() {
-                let nr = cr + dr;
-                let nc = cc + dc;
-                if (1..=3).contains(&nr) && (1..=3).contains(&nc) {
-                    nbr_dir[code as usize][k] = di as i8;
-                    k += 1;
-                }
-            }
-            nbr_count[code as usize] = k as u32;
-            let states = 1 + 2 * k as u32; // none + (ls, ban?) per neighbor
-            cb_states[code as usize] = states;
-            acc += states;
-        }
-        SlideStateTable {
-            total_cb: acc as u64,
-            cb_base,
-            cb_states,
-            nbr_dir,
-            nbr_count,
-        }
-    }
-
-    /// Combined (center, ls, ban) count for slide-legal blocks (= 89).
-    #[inline]
-    pub fn total_cb(&self) -> u64 {
-        self.total_cb
-    }
-
-    #[inline]
-    pub fn cb_states(&self, center: u32) -> u32 {
-        self.cb_states[center as usize]
-    }
-
-    /// The DIRS-order index of a neighbor center among this center's in-bounds
-    /// neighbors, or None if it isn't a valid neighbor.
-    #[inline]
-    fn nbr_local(&self, center: u32, nbr: u32) -> Option<usize> {
-        let (cr, cc) = center_rc(center);
-        let (nr, nc) = center_rc(nbr);
-        let dr = nr - cr;
-        let dc = nc - cc;
-        let di = DIRS.iter().position(|&(x, y)| x == dr && y == dc)? as i8;
-        self.nbr_dir[center as usize][..self.nbr_count[center as usize] as usize]
-            .iter()
-            .position(|&d| d == di)
-    }
-
-    /// Encode (center, slide-state) -> combined index in 0..cb_states(center).
-    #[inline]
-    pub fn encode(&self, center: u32, ss: SlideState) -> u32 {
-        match ss.ls {
-            None => 0,
-            Some(ls) => {
-                let i = self
-                    .nbr_local(center, ls)
-                    .expect("ls must be an in-bounds neighbor") as u32;
-                // ban, when present, always equals ls.
-                let banned = ss.ban.is_some();
-                debug_assert!(ss.ban.map_or(true, |b| b == ls));
-                1 + 2 * i + if banned { 1 } else { 0 }
-            }
-        }
-    }
-
-    /// Decode a combined center-local index (0..cb_states(center)) -> slide-state.
-    #[inline]
-    pub fn decode(&self, center: u32, local: u32) -> SlideState {
-        if local == 0 {
-            return SlideState { ls: None, ban: None };
-        }
-        let idx = (local - 1) / 2;
-        let banned = (local - 1) % 2 == 1;
-        let di = self.nbr_dir[center as usize][idx as usize];
-        let (cr, cc) = center_rc(center);
-        let (dr, dc) = DIRS[di as usize];
-        let ls = center_code_rc(cr + dr, cc + dc);
-        SlideState {
-            ls: Some(ls),
-            ban: if banned { Some(ls) } else { None },
-        }
-    }
-
-    /// Split a global combined index (0..89) into (center, slide-state).
-    #[inline]
-    pub fn split(&self, cb: u32) -> (u32, SlideState) {
-        let mut center = 0u32;
-        for c in 0..9u32 {
-            if self.cb_base[c as usize] <= cb {
-                center = c;
-            } else {
-                break;
-            }
-        }
-        let local = cb - self.cb_base[center as usize];
-        (center, self.decode(center, local))
-    }
-
-    /// Combine (center, slide-state) into a global combined index (0..89).
-    #[inline]
-    pub fn combine(&self, center: u32, ss: SlideState) -> u32 {
-        self.cb_base[center as usize] + self.encode(center, ss)
-    }
-}
 
 /// Binomial coefficients C(n,k) for n,k <= 25. C[n][k].
 pub struct Binom {
@@ -263,14 +90,16 @@ impl Binom {
 }
 
 /// Precomputed offsets and sizes so global index <-> (block, local) is O(1).
+///
+/// No-ban ruleset: the only per-position grid dimension is the 9-way center, so
+/// every block's cb_size is `CENTERS`.
 pub struct Indexer {
     binom: Binom,
-    ban: SlideStateTable,
     /// base[i] = first global index of block i.
     base: [u64; NBLOCKS],
     /// For block i: number of active-subsets = C(25, a).
     active_choices: [u64; NBLOCKS],
-    /// For block i: the center+ban dimension size (9 or 49).
+    /// For block i: the center dimension size (always 9).
     cb_size: [u64; NBLOCKS],
     /// Total number of states across all blocks.
     total: u64,
@@ -279,7 +108,6 @@ pub struct Indexer {
 impl Indexer {
     pub fn new() -> Self {
         let binom = Binom::new();
-        let ban = SlideStateTable::new();
         let mut base = [0u64; NBLOCKS];
         let mut active_choices = [0u64; NBLOCKS];
         let mut cb_size = [0u64; NBLOCKS];
@@ -289,20 +117,13 @@ impl Indexer {
             let ca = binom.c(SQUARES, a as usize);
             let cb = binom.c(SQUARES - a as usize, b as usize);
             active_choices[i] = ca;
-            // Slide-legal blocks carry the (center,ban) dimension (49); others
-            // just the plain center (9).
-            let cbs = if slide_legal_block(a, b) {
-                ban.total_cb()
-            } else {
-                CENTERS
-            };
+            let cbs = CENTERS; // 9-way grid center; no ban dimension
             cb_size[i] = cbs;
             let block_states = ca * cb * cbs;
             acc += block_states;
         }
         Indexer {
             binom,
-            ban,
             base,
             active_choices,
             cb_size,
@@ -313,16 +134,6 @@ impl Indexer {
     #[inline]
     pub fn total(&self) -> u64 {
         self.total
-    }
-
-    #[inline]
-    pub fn binom(&self) -> &Binom {
-        &self.binom
-    }
-
-    #[inline]
-    pub fn slide_states(&self) -> &SlideStateTable {
-        &self.ban
     }
 
     #[inline]

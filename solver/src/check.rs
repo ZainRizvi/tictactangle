@@ -41,8 +41,8 @@ fn st(board: [u8; 25], cr: i8, cc: i8, turn: u8) -> State {
         turn,
         ls_r: -1,
         ls_c: -1,
-        bn_r: -1,
-        bn_c: -1,
+        bn: 0,
+        bn_prev: 0,
     }
 }
 

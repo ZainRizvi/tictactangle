@@ -11,7 +11,7 @@ use crate::canon::{center_code, Canon};
 use crate::index::{Indexer, BLOCKS, SQUARES};
 use tictactwo_engine::State;
 
-/// The empty starting position (center (2,2), X to move, no slide history).
+/// The empty starting position (center (2,2), X to move, no ban state).
 fn initial_state() -> State {
     State {
         board: [0; 25],
@@ -20,8 +20,8 @@ fn initial_state() -> State {
         turn: 1,
         ls_r: -1,
         ls_c: -1,
-        bn_r: -1,
-        bn_c: -1,
+        bn: 0,
+        bn_prev: 0,
     }
 }
 
@@ -115,52 +115,26 @@ pub fn run() {
             1 + rng.below(3) as i8,
         );
         let (cr, cc) = crate::canon::center_decode(center);
-        // Random-but-consistent anti-loop slide state for slide-legal blocks:
-        // pick ls = a random in-bounds neighbor (or none), and ban = ls or none.
-        let (ls_r, ls_c, bn_r, bn_c) = if crate::index::slide_legal_block(a, b) && rng.below(2) == 1
-        {
-            // pick a random in-bounds neighbor direction
-            let dirs = crate::index::DIRS;
-            let mut valid = [(0i8, 0i8); 8];
-            let mut nk = 0;
-            for &(dr, dc) in &dirs {
-                if (1..=3).contains(&(cr + dr)) && (1..=3).contains(&(cc + dc)) {
-                    valid[nk] = (cr + dr, cc + dc);
-                    nk += 1;
-                }
-            }
-            let (lr, lc) = valid[rng.below(nk as u64) as usize];
-            if rng.below(2) == 1 {
-                (lr, lc, lr, lc) // ls and ban both this neighbor
-            } else {
-                (lr, lc, -1, -1) // ls only
-            }
-        } else {
-            (-1, -1, -1, -1)
-        };
+        // No-ban ruleset: the canonical state carries no ls/ban; any ban fields
+        // on the input are normalized away by from_state.
         let s = tictactwo_engine::State {
             board,
             cr,
             cc,
             turn: 1,
-            ls_r,
-            ls_c,
-            bn_r,
-            bn_c,
+            ls_r: -1,
+            ls_c: -1,
+            bn: 0,
+            bn_prev: 0,
         };
         let c = Canon::from_state(&s).expect("valid counts");
         let g = c.index(&ix);
         let c2 = Canon::from_index(&ix, g);
         assert_eq!(c, c2, "from_index(index(c)) == c");
-        // to_state must reproduce the board, center, and slide state.
+        // to_state must reproduce the board and center.
         let s2 = c2.to_state();
         assert_eq!(s2.board, board, "board reproduced");
         assert_eq!((s2.cr, s2.cc), (cr, cc), "center reproduced");
-        assert_eq!(
-            (s2.ls_r, s2.ls_c, s2.bn_r, s2.bn_c),
-            (ls_r, ls_c, bn_r, bn_c),
-            "slide state reproduced"
-        );
         count += 1;
     }
     println!("  OK ({} random positions)\n", count);
@@ -174,31 +148,33 @@ pub fn run() {
     let mut rng = Rng(0x0bad_c0de_face_1234);
     let mut positions = 0u64;
     let mut children = 0u64;
-    // Also assert the anti-loop invariant we rely on: whenever a slide arms a
-    // ban, the banned center equals the last-slide origin (so encoding ban==ls
-    // is complete). And ls/ban only ever appear in slide-legal positions.
+    // Drive the game through ban-free canonical representatives (exactly what
+    // the solver explores): each position is the no_ban-normalized `to_state`
+    // of its Canon. Every Undecided child must canonicalize and survive an
+    // index round-trip reproducing board + center.
+    // Driving the *raw* engine state (real turn + real ban fields from the
+    // reworked anti-loop rule) and canonicalizing each position is the more
+    // thorough test: it exercises genuine reachable states, including
+    // ban-carrying ones, and confirms they all canonicalize to a valid ban-free
+    // representative that round-trips through the index.
     for _ in 0..30_000 {
         let mut s = initial_state();
         for _ply in 0..80 {
-            // current to-move position must canonicalize
-            assert!(
-                Canon::from_state(&s).is_some(),
-                "unreachable to-move block for {:?} counts",
-                (
-                    s.board.iter().filter(|&&v| v == s.turn).count(),
-                    s.board.iter().filter(|&&v| v == 3 - s.turn).count()
+            Canon::from_state(&s).unwrap_or_else(|| {
+                panic!(
+                    "unreachable to-move block for counts {:?}",
+                    (
+                        s.board.iter().filter(|&&v| v == s.turn).count(),
+                        s.board.iter().filter(|&&v| v == 3 - s.turn).count()
+                    )
                 )
-            );
+            });
             positions += 1;
             let mut moves = [0u32; 96];
             let n = tictactwo_engine::legal_moves(&s, &mut moves);
             if n == 0 {
                 break;
             }
-            // every Undecided child must canonicalize AND survive an
-            // index round-trip reproducing its full engine state (board,
-            // center, and anti-loop slide fields). This is the real guarantee
-            // that (ls,ban) fully captures what the engine reads.
             for &m in &moves[..n] {
                 let (ns, out) = tictactwo_engine::apply(&s, m);
                 if out == tictactwo_engine::Outcome::Undecided {
@@ -211,25 +187,15 @@ pub fn run() {
                             )
                         )
                     });
-                    // ban, when armed, must equal ls (encoding relies on this).
-                    if c.ss.ban.is_some() {
-                        assert_eq!(c.ss.ban, c.ss.ls, "ban must equal ls");
-                    }
                     let g = c.index(&ix);
                     let back = Canon::from_index(&ix, g).to_state();
-                    // Compare against a canonicalized (active=X) view of ns.
                     let cns = c.to_state();
                     assert_eq!(back.board, cns.board, "child board round-trip");
                     assert_eq!((back.cr, back.cc), (cns.cr, cns.cc), "child center");
-                    assert_eq!(
-                        (back.ls_r, back.ls_c, back.bn_r, back.bn_c),
-                        (cns.ls_r, cns.ls_c, cns.bn_r, cns.bn_c),
-                        "child slide-state round-trip"
-                    );
                     children += 1;
                 }
             }
-            // advance by a random move
+            // advance by a random move, then re-normalize to the ban-free rep
             let m = moves[rng.below(n as u64) as usize];
             let (ns, out) = tictactwo_engine::apply(&s, m);
             if out != tictactwo_engine::Outcome::Undecided {

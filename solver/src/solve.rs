@@ -122,19 +122,13 @@ impl Solver {
             let local = g - base;
             let mut active = [0u8; 4];
             let mut waiting = [0u8; 4];
-            let (na, nw, cb) = ix.deindex(block, local, &mut active, &mut waiting);
-            let (center, ss) = if crate::index::slide_legal_block(na as u32, nw as u32) {
-                ix.slide_states().split(cb)
-            } else {
-                (cb, crate::index::SlideState { ls: None, ban: None })
-            };
+            let (na, nw, center) = ix.deindex(block, local, &mut active, &mut waiting);
             let c = Canon {
                 active,
                 na,
                 waiting,
                 nw,
                 center,
-                ss,
             };
             let s = c.to_state();
             // Skip positions that already contain a completed line (they can

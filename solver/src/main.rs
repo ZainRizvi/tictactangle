@@ -15,11 +15,11 @@ mod index;
 mod solve;
 mod verify;
 
-use canon::{center_decode, Canon};
+use canon::Canon;
 use index::{Indexer, BLOCKS, CENTERS, SQUARES};
-use solve::{Solver, LOSS, UNKNOWN, WIN};
+use solve::{Solver, LOSS, WIN};
 use std::io::Write;
-use tictactwo_engine::{Move, State};
+use tictactwo_engine::Move;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -44,40 +44,34 @@ fn main() {
 fn cmd_count() {
     let binom = index::Binom::new();
     let ix = Indexer::new();
-    println!("Tic Tac Two exact reachable-state count (turn-symmetry normalized,\nanti-loop ruleset with the last-slide/ban dimension)\n");
     println!(
-        "{:>8}  {:>16}  {:>4}  {:>18}",
-        "(a,b)", "configs", "cbF", "states"
+        "Tic Tac Two exact reachable-state count\n\
+         (no-ban official ruleset, turn-symmetry normalized)\n"
     );
+    println!("{:>8}  {:>16}  {:>18}", "(a,b)", "configs", "x9 states");
     let mut total_cfg = 0u64;
-    let mut total = 0u64;
-    for (i, &(a, b)) in BLOCKS.iter().enumerate() {
+    for &(a, b) in BLOCKS.iter() {
         let ca = binom.c(SQUARES, a as usize);
         let cb = binom.c(SQUARES - a as usize, b as usize);
         let cfg = ca * cb;
-        let cbf = ix.cb_size(i); // 9 (no slide) or 89 (slide-legal: center*ls*ban)
         total_cfg += cfg;
-        total += cfg * cbf;
         println!(
-            "{:>8}  {:>16}  {:>4}  {:>18}",
+            "{:>8}  {:>16}  {:>18}",
             format!("({},{})", a, b),
             cfg,
-            cbf,
-            cfg * cbf
+            cfg * CENTERS
         );
     }
-    let plain_total = total_cfg * CENTERS;
+    let total = total_cfg * CENTERS;
     println!("\n  configs (no center): {}", total_cfg);
-    println!("  x9 grid centers (pre-anti-loop):  {}", plain_total);
-    println!("  with anti-loop (center*ls*ban):   {}", total);
+    println!("  x9 grid centers:     {}", total);
     println!(
         "\n  The naive estimate (raw board colorings, no grid, no alternation) was\n  \
          119,999,650. Turn-symmetry + alternation gives exactly {} configs\n  \
          (13 count blocks: alternation allows gaps up to 2, e.g. (2,4), not just\n  \
-         |a-b|<=1). x9 grid centers = {} for the pre-anti-loop rules. The\n  \
-         anti-loop rule adds a last-slide/ban dimension (cbF=89 for slide-legal\n  \
-         blocks instead of 9), giving {} total states.",
-        total_cfg, plain_total, total
+         |a-b|<=1). x9 grid centers = {} total states. The no-ban ruleset needs\n  \
+         no last-slide/ban dimension, so the grid factor is exactly 9.",
+        total_cfg, total
     );
 
     assert_eq!(ix.total(), total, "indexer total must match combinatorics");
@@ -112,16 +106,7 @@ fn cmd_solve(out_path: &str) {
     println!("  DRAW : {:>13}  ({:.3}%)", d, 100.0 * d as f64 / total as f64);
 
     // Value of the initial position: empty board, center (2,2), turn 1.
-    let init = State {
-        board: [0; 25],
-        cr: 2,
-        cc: 2,
-        turn: 1,
-        ls_r: -1,
-        ls_c: -1,
-        bn_r: -1,
-        bn_c: -1,
-    };
+    let init = canon::ban_free_state([0; 25], 2, 2, 1);
     let ic = Canon::from_state(&init).unwrap();
     let iv = solver.value_of(&ic);
     println!("\nInitial position value: {}", label_str(iv));
@@ -143,7 +128,8 @@ fn cmd_solve(out_path: &str) {
     println!("\nTotal wall time: {:.1?}", t_start.elapsed());
 }
 
-/// Query a single position given in the tools/ data format.
+/// Query a single position given in the tools/ data format. The no-ban ruleset
+/// has no ban state, so no ls/ban arguments are needed.
 fn cmd_query(args: &[String]) {
     if args.len() < 4 {
         eprintln!("query <board25chars> <cr> <cc> <turn> [table.bin]");
@@ -154,11 +140,6 @@ fn cmd_query(args: &[String]) {
     let cc: i8 = args[2].parse().expect("cc");
     let turn: u8 = args[3].parse().expect("turn");
     let table = args.get(4).map(|s| s.as_str()).unwrap_or("table.bin");
-    // Optional anti-loop slide state: ls_r ls_c bn_r bn_c (each 1..3, or -1/0
-    // = none). Position 5..9. Defaults to none.
-    let sf = |i: usize| args.get(i).and_then(|s| s.parse::<i8>().ok()).unwrap_or(-1);
-    let norm = |v: i8| if v == 0 { -1 } else { v };
-    let (ls_r, ls_c, bn_r, bn_c) = (norm(sf(5)), norm(sf(6)), norm(sf(7)), norm(sf(8)));
 
     let mut board = [0u8; 25];
     let bytes = board_str.as_bytes();
@@ -166,16 +147,7 @@ fn cmd_query(args: &[String]) {
     for i in 0..25 {
         board[i] = bytes[i] - b'0';
     }
-    let s = State {
-        board,
-        cr,
-        cc,
-        turn,
-        ls_r,
-        ls_c,
-        bn_r,
-        bn_c,
-    };
+    let s = canon::ban_free_state(board, cr, cc, turn);
 
     let solver = Solver::load(table).unwrap_or_else(|e| {
         eprintln!("could not load {}: {} — solve first", table, e);

@@ -1,14 +1,20 @@
-//! Conversion between the engine's `State` (X/O with an absolute turn, plus the
-//! anti-loop slide history) and the solver's normalized canonical form
-//! (active-to-move vs. waiting), and the mapping to/from the global perfect
-//! index.
+//! Conversion between the engine's `State` (X/O with an absolute turn) and the
+//! solver's normalized canonical form (active-to-move vs. waiting), and the
+//! mapping to/from the global perfect index.
+//!
+//! We solve the **no-ban** official ruleset: any move-repetition ban the engine
+//! might track (its `ls`/`bn` anti-loop fields, or any future accumulating ban
+//! list) is normalized away — `from_state` ignores those fields and `to_state`
+//! clears them, so `apply`/`legal_moves` never arm or enforce a ban. This
+//! `no_ban` normalization is applied to every state (including every child)
+//! before it is encoded, which is exactly the game with no move banning.
 
-use crate::index::{center_code_rc, center_rc, slide_legal_block, Indexer, SlideState, BLOCKS};
+use crate::index::{center_code_rc, center_rc, Indexer, BLOCKS};
 use tictactwo_engine::State;
 
 /// A normalized position: occupancy sets for the player to move (active) and
-/// the player who just moved (waiting), the grid center as 0..8, and the
-/// anti-loop slide state (last-slide origin + one-turn ban).
+/// the player who just moved (waiting), plus the grid center as 0..8. No ban
+/// state — this is the no-ban ruleset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Canon {
     /// Ascending occupied squares of the active player.
@@ -19,9 +25,6 @@ pub struct Canon {
     pub nw: usize,
     /// Grid center encoded as (cr-1)*3 + (cc-1), range 0..9.
     pub center: u32,
-    /// Anti-loop slide state (ls origin + ban). For blocks where slides are not
-    /// yet legal this is always {none, none}.
-    pub ss: SlideState,
 }
 
 /// Encode a grid center (cr, cc), each in 1..=3, to 0..9.
@@ -45,20 +48,27 @@ pub fn block_for(na: usize, nw: usize) -> Option<usize> {
         .position(|&(a, b)| a as usize == na && b as usize == nw)
 }
 
-/// Map an engine center field pair (-1 = none, else 1..3) to an optional code.
-#[inline]
-fn field_center(r: i8, c: i8) -> Option<u32> {
-    if r < 0 || c < 0 {
-        None
-    } else {
-        Some(center_code_rc(r, c))
+/// Build an engine `State` with all ban-tracking fields cleared (the no_ban
+/// normalization). Centralized so a future engine change to the ban fields is a
+/// one-line fix here rather than scattered across the crate.
+pub fn ban_free_state(board: [u8; 25], cr: i8, cc: i8, turn: u8) -> State {
+    State {
+        board,
+        cr,
+        cc,
+        turn,
+        ls_r: -1,
+        ls_c: -1,
+        bn: 0,
+        bn_prev: 0,
     }
 }
 
 impl Canon {
-    /// Build a canonical position from an engine state. The active player is
-    /// `s.turn`; the waiting player is the other. Returns None if the piece
-    /// counts violate alternation (not a reachable to-move position).
+    /// Build a canonical position from an engine state (the `no_ban`
+    /// normalization: any ls/bn ban-tracking fields are ignored). The active
+    /// player is `s.turn`; the waiting player is the other. Returns None if the
+    /// piece counts violate alternation (not a reachable to-move position).
     pub fn from_state(s: &State) -> Option<Canon> {
         let me = s.turn;
         let opp = 3 - me;
@@ -85,32 +95,26 @@ impl Canon {
                 _ => {}
             }
         }
-        let block = block_for(na, nw)?;
-        // Slide state only exists where slides are legal; otherwise it must be
-        // empty (a placement/early position can carry no ls/ban).
-        let ss = if slide_legal_block(na as u32, nw as u32) {
-            SlideState {
-                ls: field_center(s.ls_r, s.ls_c),
-                ban: field_center(s.bn_r, s.bn_c),
-            }
-        } else {
-            SlideState { ls: None, ban: None }
-        };
-        let _ = block;
+        block_for(na, nw)?;
         Some(Canon {
             active,
             na,
             waiting,
             nw,
             center: center_code(s.cr, s.cc),
-            ss,
         })
     }
 
     /// Reconstruct an engine state. We always assign the active player X (turn
-    /// 1) and the waiting player O (turn 2); this is a canonical representative
-    /// — the game value is invariant to the swap. The anti-loop fields are set
-    /// from the slide state (-1 = none).
+    /// 1) and the waiting player O (turn 2); the game value is invariant to the
+    /// swap.
+    ///
+    /// The `no_ban` normalization clears every ban-tracking field: `ls_r/ls_c`
+    /// = -1 (no last slide, so `apply` never detects an undo and never arms a
+    /// ban) and the ban masks `bn`/`bn_prev` = 0 (no ban enforced). With this
+    /// invariant on every state fed to `apply`, no ban is ever armed or
+    /// enforced, so we solve the plain official ruleset with no move banning.
+    /// If the engine grows more ban fields, clear them here too.
     pub fn to_state(&self) -> State {
         let mut board = [0u8; 25];
         for &sq in &self.active[..self.na] {
@@ -120,23 +124,15 @@ impl Canon {
             board[sq as usize] = 2;
         }
         let (cr, cc) = center_decode(self.center);
-        let (ls_r, ls_c) = match self.ss.ls {
-            Some(code) => center_rc(code),
-            None => (-1, -1),
-        };
-        let (bn_r, bn_c) = match self.ss.ban {
-            Some(code) => center_rc(code),
-            None => (-1, -1),
-        };
         State {
             board,
             cr,
             cc,
             turn: 1,
-            ls_r,
-            ls_c,
-            bn_r,
-            bn_c,
+            ls_r: -1,
+            ls_c: -1,
+            bn: 0,
+            bn_prev: 0,
         }
     }
 
@@ -145,23 +141,14 @@ impl Canon {
         block_for(self.na, self.nw).expect("valid counts")
     }
 
-    /// The combined center+slide-state code for this position's block.
-    #[inline]
-    fn cb(&self, ix: &Indexer) -> u32 {
-        if slide_legal_block(self.na as u32, self.nw as u32) {
-            ix.slide_states().combine(self.center, self.ss)
-        } else {
-            self.center
-        }
-    }
-
-    /// Global perfect index of this position.
+    /// Global perfect index of this position (center is the only per-position
+    /// grid dimension in the no-ban ruleset).
     pub fn index(&self, ix: &Indexer) -> u64 {
         ix.index(
             self.block(),
             &self.active[..self.na],
             &self.waiting[..self.nw],
-            self.cb(ix),
+            self.center,
         )
     }
 
@@ -180,19 +167,13 @@ impl Canon {
         let local = global - ix.block_base(block);
         let mut active = [0u8; 4];
         let mut waiting = [0u8; 4];
-        let (na, nw, cb) = ix.deindex(block, local, &mut active, &mut waiting);
-        let (center, ss) = if slide_legal_block(na as u32, nw as u32) {
-            ix.slide_states().split(cb)
-        } else {
-            (cb, SlideState { ls: None, ban: None })
-        };
+        let (na, nw, center) = ix.deindex(block, local, &mut active, &mut waiting);
         Canon {
             active,
             na,
             waiting,
             nw,
             center,
-            ss,
         }
     }
 }
