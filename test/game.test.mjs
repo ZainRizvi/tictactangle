@@ -206,6 +206,20 @@ test('anti-loop: a non-undo reply slide arms no ban, and bans chain naturally', 
   assert.ok(isLegal(s, { type: 'grid', dr: 1, dc: 0 })); // A → B available again
 });
 
+test('anti-loop: reverting your own slide after an intervening move arms nothing', () => {
+  let s = newGame();
+  s = applyMove(s, { type: 'place', to: idx(1, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(1, 2) }); // O
+  s = applyMove(s, { type: 'place', to: idx(2, 1) }); // X
+  s = applyMove(s, { type: 'place', to: idx(2, 2) }); // O
+  s = applyMove(s, { type: 'grid', dr: 1, dc: 0 }); // X: A(2,2) → B(3,2)
+  s = applyMove(s, { type: 'place', to: idx(3, 3) }); // O places (not a slide)
+  s = applyMove(s, { type: 'grid', dr: -1, dc: 0 }); // X reverts own slide: B → A
+  // Not an undo of an opponent slide — no ban arms against O.
+  assert.equal(s.bannedSlideTo, null);
+  assert.ok(isLegal(s, { type: 'grid', dr: 1, dc: 0 })); // O may slide A → B
+});
+
 test('grid cannot slide off the board', () => {
   let s = newGame();
   s = applyMove(s, { type: 'place', to: idx(1, 1) });

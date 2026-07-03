@@ -110,6 +110,26 @@ for (const variant of ['medium', 'hard', 'impossible']) {
     assert.equal(landsOnBanned, false);
   });
 
+  t('takes a winning slide that reverts the opponent when no ban is armed', async () => {
+    const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
+    const s = newGame();
+    // Same position, but O's preceding slide was NOT an undo of an X slide:
+    // lastSlideFrom is set (O just slid (2,2) → (1,2)) with no ban armed, so
+    // X's winning "revert" (1,2) → (2,2) is legal and must be found. Guards
+    // against the engine over-restricting (arming phantom bans internally).
+    s.board[idx(3, 1)] = X; s.board[idx(3, 2)] = X; s.board[idx(3, 3)] = X; s.board[idx(0, 0)] = X;
+    s.board[idx(0, 2)] = O; s.board[idx(0, 3)] = O; s.board[idx(4, 0)] = O; s.board[idx(4, 4)] = O;
+    s.placed[X] = 4; s.placed[O] = 4;
+    s.reserve[X] = 0; s.reserve[O] = 0;
+    s.center = { r: 1, c: 2 };
+    s.lastSlideFrom = { r: 2, c: 2 };
+    s.bannedSlideTo = null;
+    const move = await engine.chooseMove(s);
+    const n = applyMove(s, move);
+    assert.equal(n.result?.type, 'win');
+    assert.equal(n.result.winner, X);
+  });
+
   t('wins with a piece move when placements are exhausted', async () => {
     const engine = await createWasmEngine(bytes, mkOpts({ maxDepth: 4, nodeBudget: 200000, seed: 7 }));
     const s = newGame();
