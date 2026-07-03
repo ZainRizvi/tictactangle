@@ -6,19 +6,30 @@ import { createAiPlayer, withMinDelay } from './ai/index.js';
 import { mountDomView } from './ui/view.js';
 
 const session = new GameSession();
-const aiPlayer = createAiPlayer().then((ai) => withMinDelay(ai, 550));
+
+// One paced player per difficulty, created lazily and cached.
+const aiPlayers = new Map();
+function getAiPlayer(difficulty) {
+  if (!aiPlayers.has(difficulty)) {
+    aiPlayers.set(
+      difficulty,
+      createAiPlayer(difficulty).then((ai) => withMinDelay(ai, 550))
+    );
+  }
+  return aiPlayers.get(difficulty);
+}
 
 // Generation counter guards against a slow AI load landing after the user
-// has already switched back to PvP.
+// has already switched mode, side, or difficulty again.
 let seatGeneration = 0;
 
-async function configureSeats(mode, humanSide) {
+async function configureSeats(mode, humanSide, difficulty = 'medium') {
   const gen = ++seatGeneration;
   if (mode === 'pvp') {
     session.setSeats({ [X]: null, [O]: null });
     return;
   }
-  const ai = await aiPlayer;
+  const ai = await getAiPlayer(difficulty);
   if (gen !== seatGeneration) return;
   session.setSeats({ [humanSide]: null, [other(humanSide)]: ai });
 }

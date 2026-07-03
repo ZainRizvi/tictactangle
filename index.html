@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b0c11" />
   <title>Tic Tac Two</title>
   <meta name="description" content="Tic Tac Two — the tic-tac-toe variant on a 5x5 board with a movable 3x3 grid. Play locally or against an in-browser AI." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='6' y='6' width='88' height='88' rx='18' fill='%230b0c11' stroke='%23ffb648' stroke-width='6'/%3E%3Cpath d='M30 30 L54 54 M54 30 L30 54' stroke='%23ff5d4d' stroke-width='10' stroke-linecap='round'/%3E%3Ccircle cx='64' cy='66' r='13' fill='none' stroke='%2333e0c0' stroke-width='9'/%3E%3C/svg%3E" />
@@ -55,6 +56,13 @@
           <div class="side-btns" role="group" aria-label="Your side">
             <button class="side-btn side-x is-active" id="sideX" aria-pressed="true">X</button>
             <button class="side-btn side-o" id="sideO" aria-pressed="false">O</button>
+          </div>
+        </div>
+        <div class="side-picker" id="difficultyPicker" hidden>
+          <span class="side-label">difficulty</span>
+          <div class="side-btns" role="group" aria-label="AI difficulty">
+            <button class="diff-btn is-active" id="diffMedium" data-difficulty="medium" aria-pressed="true">medium</button>
+            <button class="diff-btn" id="diffHard" data-difficulty="hard" aria-pressed="false">hard</button>
           </div>
         </div>
       </div>

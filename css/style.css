@@ -27,6 +27,9 @@
 
 html { color-scheme: dark; }
 
+/* kill double-tap zoom & tap flash on all controls (mobile) */
+button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
 body {
   font-family: var(--mono);
   color: var(--text);
@@ -289,6 +292,17 @@ body::after {
 
 .g-arrow[hidden] { display: none; }
 
+/* touch screens need bigger slide targets */
+@media (pointer: coarse) {
+  .g-arrow {
+    width: calc(var(--board) * 0.095);
+    height: calc(var(--board) * 0.095);
+    min-width: 32px;
+    min-height: 32px;
+    font-size: calc(var(--board) * 0.04);
+  }
+}
+
 /* ---------- endgame overlay ---------- */
 
 .endgame {
@@ -402,6 +416,26 @@ body::after {
 .side-btn.side-x.is-active { color: var(--x); border-color: var(--x-soft); box-shadow: 0 0 12px rgba(255, 93, 77, 0.18); }
 .side-btn.side-o.is-active { color: var(--o); border-color: var(--o-soft); box-shadow: 0 0 12px rgba(51, 224, 192, 0.18); }
 
+.diff-btn {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg0);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.diff-btn.is-active {
+  color: var(--amber);
+  border-color: rgba(255, 182, 72, 0.4);
+  box-shadow: 0 0 12px rgba(255, 182, 72, 0.15);
+}
+
 .turn-card { display: flex; align-items: center; gap: 12px; }
 
 .turn-glyph { width: 34px; height: 34px; flex: none; }
@@ -486,7 +520,14 @@ body::after {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
 }
 
-.rules-body { padding: 26px; }
+.rules-dialog { max-height: 88vh; max-height: 88dvh; }
+
+.rules-body {
+  padding: 26px;
+  max-height: 88vh;
+  max-height: 88dvh;
+  overflow-y: auto;
+}
 
 .rules-dialog::backdrop { background: rgba(5, 6, 10, 0.7); backdrop-filter: blur(3px); }
 

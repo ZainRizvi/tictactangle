@@ -252,27 +252,54 @@ fn encode(s: &State, feat: &mut [f32; 61]) {
     feat[60] = (PIECES - placed(s, opp)) as f32 / PIECES as f32;
 }
 
-/// Small MLP value head: 61 -> 64 relu -> 32 relu -> 1 tanh-ish.
+/// Small MLP value head: 61 -> H1 relu -> H2 relu -> 1 softsign.
+/// Layer sizes come from the generated weights module, so difficulty
+/// variants can ship differently sized nets from the same source.
 fn eval_nn(s: &State) -> f32 {
     use weights::*;
     let mut feat = [0.0f32; 61];
     encode(s, &mut feat);
 
-    let mut h1 = [0.0f32; 64];
-    for (j, h) in h1.iter_mut().enumerate() {
-        let mut acc = B1[j];
-        for (i, &f) in feat.iter().enumerate() {
-            acc += W1[i * 64 + j] * f;
+    // Layer 1 exploits input sparsity: at most ~12 of the 61 features are
+    // nonzero (pieces + center one-hot + reserves), and piece planes are 1.0.
+    let mut h1 = [0.0f32; H1];
+    h1.copy_from_slice(&B1);
+    for (i, &f) in feat.iter().enumerate() {
+        if f == 0.0 {
+            continue;
         }
-        *h = if acc > 0.0 { acc } else { 0.0 };
+        let row = &W1[i * H1..(i + 1) * H1];
+        if f == 1.0 {
+            for j in 0..H1 {
+                h1[j] += row[j];
+            }
+        } else {
+            for j in 0..H1 {
+                h1[j] += row[j] * f;
+            }
+        }
     }
-    let mut h2 = [0.0f32; 32];
-    for (j, h) in h2.iter_mut().enumerate() {
-        let mut acc = B2[j];
-        for (i, &v) in h1.iter().enumerate() {
-            acc += W2[i * 32 + j] * v;
+    for h in h1.iter_mut() {
+        if *h < 0.0 {
+            *h = 0.0;
         }
-        *h = if acc > 0.0 { acc } else { 0.0 };
+    }
+    // Layer 2 skips rows for ReLU-zeroed activations (~half of them).
+    let mut h2 = [0.0f32; H2];
+    h2.copy_from_slice(&B2);
+    for (i, &v) in h1.iter().enumerate() {
+        if v == 0.0 {
+            continue;
+        }
+        let row = &W2[i * H2..(i + 1) * H2];
+        for j in 0..H2 {
+            h2[j] += row[j] * v;
+        }
+    }
+    for h in h2.iter_mut() {
+        if *h < 0.0 {
+            *h = 0.0;
+        }
     }
     let mut out = B3;
     for (i, &v) in h2.iter().enumerate() {
@@ -313,11 +340,13 @@ impl Ctx {
 }
 
 /// Negamax with alpha-beta. Returns the score from `s.turn`'s perspective.
+/// The node budget counts every visited position including leaves, since
+/// leaf NN evaluations dominate the cost.
 fn search(s: &State, depth: i32, mut alpha: f32, beta: f32, ctx: &mut Ctx) -> f32 {
+    ctx.nodes -= 1;
     if depth == 0 || ctx.nodes <= 0 {
         return evaluate(s);
     }
-    ctx.nodes -= 1;
 
     let mut moves = [0u32; 96];
     let n = legal_moves(s, &mut moves);
@@ -363,13 +392,15 @@ pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
     }
 
     let mut best_move = moves[0];
+    let mut scores = [0.0f32; 96];
     for depth in 1..=max_depth {
         let mut round_best = -WIN * 4.0;
         let mut round_move = NO_MOVE;
         let mut alpha = -WIN * 4.0;
         let start_nodes = ctx.nodes;
 
-        for &m in &moves[..n] {
+        for k in 0..n {
+            let m = moves[k];
             let (ns, out) = apply(s, m);
             let v = match out {
                 Outcome::Win(p) if p == s.turn => WIN + depth as f32,
@@ -377,6 +408,7 @@ pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
                 Outcome::Tie => 0.0,
                 Outcome::Undecided => -search(&ns, depth - 1, -(WIN * 4.0), -alpha, &mut ctx),
             };
+            scores[k] = v;
             if v > round_best {
                 round_best = v;
                 round_move = m;
@@ -393,10 +425,24 @@ pub fn choose(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> Move {
         if round_best >= WIN || exhausted {
             break;
         }
-        // If this depth used almost nothing, keep deepening; otherwise stop
-        // when the next depth can't plausibly fit the remaining budget.
+
+        // Order the next round by this round's scores (insertion sort keeps
+        // moves and scores paired) — much tighter alpha-beta pruning.
+        for a in 1..n {
+            let (mv, sc) = (moves[a], scores[a]);
+            let mut b = a;
+            while b > 0 && scores[b - 1] < sc {
+                moves[b] = moves[b - 1];
+                scores[b] = scores[b - 1];
+                b -= 1;
+            }
+            moves[b] = mv;
+            scores[b] = sc;
+        }
+        // Stop deepening when the next depth can't plausibly fit the
+        // remaining budget (alpha-beta grows roughly ~6-8x per ply here).
         let used = start_nodes - ctx.nodes;
-        if ctx.nodes < used * 20 {
+        if ctx.nodes < used * 6 {
             break;
         }
     }

@@ -2,16 +2,19 @@
 // Plays the JS engine against itself with exploration noise and records every
 // position with the eventual outcome from the side-to-move's perspective.
 //
-// Usage: node tools/gen-data.mjs <games> <outfile> [seed]
+// Usage: node tools/gen-data.mjs <games> <outfile> [seed] [engineSpec]
+//   engineSpec (see tools/engines.mjs) picks the self-play engine; default
+//   is the fast JS engine, "wasm:..." uses a WASM variant as the teacher.
 // Output: one line per position — "<board25chars> <cr> <cc> <turn> <z>"
 
 import { writeFileSync } from 'node:fs';
 import { newGame, applyMove, legalMoves, X } from '../js/domain/rules.js';
-import { createJsEngine } from '../js/ai/engine.js';
+import { makeEngine } from './engines.mjs';
 
 const games = Number(process.argv[2] ?? 500);
 const outfile = process.argv[3] ?? 'data/selfplay.txt';
 let rngState = (Number(process.argv[4] ?? 1) * 2654435761) >>> 0 || 1;
+const engineSpec = process.argv[5] ?? 'js:12';
 
 const rand = () => {
   // xorshift32
@@ -21,7 +24,7 @@ const rand = () => {
   return rngState / 0x100000000;
 };
 
-const engine = createJsEngine({ timeBudgetMs: 12 });
+const engine = await makeEngine(engineSpec, rngState);
 const MAX_PLY = 80;
 const EPSILON = 0.1;
 

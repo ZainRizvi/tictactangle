@@ -23,12 +23,25 @@ Two modes: local two-player, or versus an AI opponent that runs entirely in your
 ## The AI
 
 The opponent is a Rust engine compiled to WebAssembly: negamax alpha-beta search with a
-small neural network (61→64→32→1, ~6k parameters) as its leaf evaluator. The net was
-trained on ~143k positions from ~9,600 noisy self-play games, predicting the eventual
-winner from the side-to-move's perspective. Everything — search and inference — runs
-client-side in the WASM module (~36 KB); a pure-JS alpha-beta engine serves as fallback
-when WASM is unavailable. In head-to-head play the trained evaluator beats both the JS
-engine and a handcrafted evaluation under identical search.
+small neural network as its leaf evaluator, trained to predict the eventual winner from
+the side-to-move's perspective. Everything — search and inference — runs client-side in
+the WASM module; a pure-JS alpha-beta engine serves as fallback when WASM is unavailable.
+
+Two difficulty levels, each its own model generation:
+
+- **Medium** (`engine-medium.wasm`, ~36 KB): 61→64→32→1 net (~6k parameters) trained on
+  ~143k positions of noisy self-play by the JS engine; searches to depth 6 (~150 ms).
+  Its evaluator beats both the JS engine and a handcrafted evaluation under identical
+  search.
+- **Hard** (`engine-hard.wasm`, ~76 KB): second-generation 61→128→64→1 net (~16k
+  parameters) trained on ~85k positions of self-play by the *medium engine* — one more
+  turn of the self-improvement crank — and searches to depth 8 (~500 ms). Against equal
+  opposition it converts wins about four plies sooner than medium.
+
+A note on measuring strength: Tic Tac Two with the no-take-backs rule is a heavily
+first-player-favored game, so head-to-head matches between strong engines are decided
+almost entirely by who moves first. Depth of punishment — how quickly an engine
+capitalizes on inaccuracies — is where the difficulty levels differ in practice.
 
 ## Architecture
 
@@ -55,7 +68,9 @@ js/
 
 wasm/
 ├── engine/           Rust crate: rules, negamax search, embedded value network.
-├── engine.wasm       Built artifact served to the browser (see wasm/build.sh).
+│   └── weights/      Generated weights modules, one per difficulty variant.
+├── engine-medium.wasm  Built artifacts served to the browser, one per difficulty
+├── engine-hard.wasm    (see wasm/build.sh <variant>).
 └── build.sh          cargo build --target wasm32-unknown-unknown + copy.
 
 tools/                Training pipeline (Node, no dependencies):
@@ -70,21 +85,26 @@ import `domain`/`app` contracts; `main.js` wires everything.
 
 ## Development
 
-The site itself has no build step — plain ES modules plus a committed `wasm/engine.wasm`.
+The site itself has no build step — plain ES modules plus the committed
+`wasm/engine-*.wasm` artifacts.
 
 ```bash
 npm run serve   # http://localhost:8080
 npm test        # domain, session, engine, and wasm-parity tests (node --test)
 ```
 
-Rebuilding the AI (requires Rust with the `wasm32-unknown-unknown` target):
+Rebuilding an AI variant (requires Rust with the `wasm32-unknown-unknown` target):
 
 ```bash
-node tools/gen-data.mjs 1200 data/part-1.txt 1   # repeat/parallelize for more data
-node tools/train.mjs "data/part-*.txt"           # → wasm/engine/weights.json
-node tools/export-weights.mjs                    # → wasm/engine/src/weights.rs
-./wasm/build.sh                                  # → wasm/engine.wasm
-node tools/arena.mjs 20 wasm:wasm/engine.wasm js:650   # strength check
+# 1. self-play data — pick the teacher engine; repeat/parallelize for volume
+node tools/gen-data.mjs 1000 data/part-1.txt 1 "wasm:wasm/engine-medium.wasm:5:120000"
+# 2. train — pattern, epochs, hidden sizes, output json
+node tools/train.mjs "data/part-*.txt" 18 128 64 wasm/engine/weights-hard.json
+# 3. codegen + build the variant
+node tools/export-weights.mjs wasm/engine/weights-hard.json wasm/engine/weights/hard.rs
+./wasm/build.sh hard                             # → wasm/engine-hard.wasm
+# 4. strength check (per-color stats + win lengths)
+node tools/arena.mjs 20 wasm:wasm/engine-hard.wasm js:650
 ```
 
 ## Credits

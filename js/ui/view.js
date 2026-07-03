@@ -16,7 +16,8 @@ function svgFor(p) {
 
 /**
  * @param {{ session: import('../app/session.js').GameSession,
- *           configureSeats: (mode: 'pvp'|'ai', humanSide: number) => void }} deps
+ *           configureSeats: (mode: 'pvp'|'ai', humanSide: number,
+ *                            difficulty: 'medium'|'hard') => void }} deps
  */
 export function mountDomView({ session, configureSeats }) {
   const $ = (id) => document.getElementById(id);
@@ -39,6 +40,7 @@ export function mountDomView({ session, configureSeats }) {
   let destination = null; // board index of a chosen empty lit cell (destination-first move)
   let mode = 'pvp';
   let humanSide = rules.X;
+  let difficulty = 'medium';
 
   // ---------- board construction ----------
 
@@ -325,7 +327,8 @@ export function mountDomView({ session, configureSeats }) {
         b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
       }
       $('sidePicker').hidden = mode !== 'ai';
-      configureSeats(mode, humanSide);
+      $('difficultyPicker').hidden = mode !== 'ai';
+      configureSeats(mode, humanSide, difficulty);
     });
   }
 
@@ -341,7 +344,20 @@ export function mountDomView({ session, configureSeats }) {
         b.classList.toggle('is-active', b === btn);
         b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
       }
-      if (mode === 'ai') configureSeats(mode, humanSide);
+      if (mode === 'ai') configureSeats(mode, humanSide, difficulty);
+    });
+  }
+
+  const diffBtns = [$('diffMedium'), $('diffHard')];
+  for (const btn of diffBtns) {
+    btn.addEventListener('click', () => {
+      if (difficulty === btn.dataset.difficulty) return;
+      difficulty = btn.dataset.difficulty;
+      for (const b of diffBtns) {
+        b.classList.toggle('is-active', b === btn);
+        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+      }
+      if (mode === 'ai') configureSeats(mode, humanSide, difficulty);
     });
   }
 

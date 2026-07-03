@@ -1,19 +1,23 @@
 // Trains the value network on self-play data. Pure JS (Float32Array + Adam).
 //
 // Architecture (must mirror wasm/engine/src/lib.rs eval_nn):
-//   61 inputs -> 64 ReLU -> 32 ReLU -> 1 softsign (x / (1 + |x|))
+//   61 inputs -> H1 ReLU -> H2 ReLU -> 1 softsign (x / (1 + |x|))
 // Inputs, from the side-to-move perspective:
 //   0..25 own pieces, 25..50 opponent pieces, 50..59 grid-center one-hot,
 //   59 own reserve/4, 60 opp reserve/4
 //
-// Usage: node tools/train.mjs "data/part-*.txt" [epochs]
-// Writes wasm/engine/weights.json
+// Usage: node tools/train.mjs "data/part-*.txt" [epochs] [h1] [h2] [outJson]
+// Writes the trained weights JSON (default wasm/engine/weights.json).
 
 import { readFileSync, writeFileSync, globSync } from 'node:fs';
 
-const IN = 61, H1 = 64, H2 = 32;
+const IN = 61;
 const pattern = process.argv[2] ?? 'data/part-*.txt';
 const EPOCHS = Number(process.argv[3] ?? 14);
+const H1 = Number(process.argv[4] ?? 64);
+const H2 = Number(process.argv[5] ?? 32);
+const OUT = process.argv[6] ?? 'wasm/engine/weights.json';
+console.log(`net ${IN}->${H1}->${H2}->1, ${EPOCHS} epochs, out ${OUT}`);
 
 // ---------- load data ----------
 
@@ -206,11 +210,11 @@ for (let epoch = 1; epoch <= EPOCHS; epoch++) {
 }
 
 writeFileSync(
-  'wasm/engine/weights.json',
+  OUT,
   JSON.stringify({
     W1: [...params.W1], B1: [...params.B1],
     W2: [...params.W2], B2: [...params.B2],
     W3: [...params.W3], B3: params.B3[0],
   })
 );
-console.log('wrote wasm/engine/weights.json');
+console.log(`wrote ${OUT}`);

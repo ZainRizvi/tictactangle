@@ -1,15 +1,28 @@
-// Engine adapter selection for the AI seat: the WASM engine (Rust negamax
-// with an embedded value network) when it loads, else the pure-JS engine.
+// Engine adapter selection for the AI seat: a WASM engine variant (Rust
+// negamax with an embedded value network) chosen by difficulty, or the
+// pure-JS engine when WASM is unavailable.
 
 import { createJsEngine } from './engine.js';
 import { createWasmEngine } from './wasm.js';
 
-/** @returns {Promise<import('../app/ports.js').PlayerController>} */
-export async function createAiPlayer() {
+export const DIFFICULTIES = {
+  medium: { file: 'engine-medium.wasm', maxDepth: 6, nodeBudget: 1_500_000 },
+  hard: { file: 'engine-hard.wasm', maxDepth: 8, nodeBudget: 600_000 },
+};
+
+/**
+ * @param {'medium'|'hard'} [difficulty]
+ * @returns {Promise<import('../app/ports.js').PlayerController>}
+ */
+export async function createAiPlayer(difficulty = 'medium') {
+  const cfg = DIFFICULTIES[difficulty] ?? DIFFICULTIES.medium;
   try {
-    const res = await fetch(new URL('../../wasm/engine.wasm', import.meta.url));
+    const res = await fetch(new URL(`../../wasm/${cfg.file}`, import.meta.url));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await createWasmEngine(await res.arrayBuffer());
+    return await createWasmEngine(await res.arrayBuffer(), {
+      maxDepth: cfg.maxDepth,
+      nodeBudget: cfg.nodeBudget,
+    });
   } catch (err) {
     console.warn('WASM engine unavailable, using JS engine', err);
     return createJsEngine();
