@@ -96,7 +96,8 @@ fn cmd_solve(out_path: &str) {
     );
 
     println!("Solving (forward fixpoint labeling)...");
-    solver.solve(|pass, w, l, dt, detail| {
+    let ckpt_path = format!("{}.ckpt", out_path);
+    solver.solve(out_path, &ckpt_path, |pass, w, l, dt, detail| {
         println!(
             "  pass {:>3}: +{:>12} WIN  +{:>12} LOSS   ({:.1?}){}",
             pass, w, l, dt, detail

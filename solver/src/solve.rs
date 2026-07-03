@@ -184,12 +184,27 @@ impl Solver {
     /// including a per-block breakdown. Uses a block-frontier: after the first
     /// full pass, a block is only rescanned when it or one of its child-blocks
     /// changed in the previous pass.
-    pub fn solve(&self, log: impl Fn(usize, u64, u64, std::time::Duration, &str)) {
+    ///
+    /// Crash/session safety: at each pass boundary the whole table plus a small
+    /// sidecar (pass number + per-block changed flags) are checkpointed to
+    /// `ckpt_path` via atomic rename, and a run resumes from the latest
+    /// checkpoint if one exists. `table_path` receives the final table.
+    pub fn solve(
+        &self,
+        table_path: &str,
+        ckpt_path: &str,
+        log: impl Fn(usize, u64, u64, std::time::Duration, &str),
+    ) {
         let deps = self.child_blocks();
         let nb = BLOCKS.len();
-        // Which blocks changed in the previous pass (all true to start).
-        let mut changed_prev = vec![true; nb];
-        let mut pass_no = 0;
+        // Resume from a checkpoint if present, else start fresh (all dirty).
+        let (mut pass_no, mut changed_prev) = match self.load_checkpoint(ckpt_path, nb) {
+            Some((p, cp)) => {
+                eprintln!("Resuming from checkpoint at pass {} (table loaded)", p);
+                (p, cp)
+            }
+            None => (0usize, vec![true; nb]),
+        };
         loop {
             pass_no += 1;
             let t0 = std::time::Instant::now();
@@ -226,7 +241,19 @@ impl Solver {
             let dt = t0.elapsed();
             log(pass_no, total_w, total_l, dt, &detail);
             changed_prev = changed_now;
-            if total_w == 0 && total_l == 0 {
+            let converged = total_w == 0 && total_l == 0;
+            // Checkpoint the pass boundary. On convergence we still checkpoint
+            // (so a resumed run detects it's done) and write the final table.
+            let tc = std::time::Instant::now();
+            if let Err(e) = self.save_checkpoint(ckpt_path, pass_no, &changed_prev) {
+                eprintln!("WARN: checkpoint write failed: {}", e);
+            } else {
+                eprintln!("    checkpoint saved after pass {} ({:.1?})", pass_no, tc.elapsed());
+            }
+            if converged {
+                if let Err(e) = self.save(table_path) {
+                    eprintln!("WARN: final table write failed: {}", e);
+                }
                 break;
             }
         }
@@ -257,19 +284,84 @@ impl Solver {
         self.values[c.index(&self.ix) as usize].load(Ordering::Relaxed)
     }
 
-    /// Persist the raw value bytes to disk. Returns the byte count written.
+    /// The value bytes as a contiguous slice.
+    /// SAFETY: AtomicU8 is repr(transparent) over u8, so the Vec<AtomicU8>
+    /// backing store is a contiguous [u8] with identical layout.
+    #[inline]
+    fn bytes(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(self.values.as_ptr() as *const u8, self.values.len())
+        }
+    }
+
+    /// Persist the raw value bytes to disk atomically (write to `<path>.tmp`
+    /// then rename). Returns the byte count written.
     pub fn save(&self, path: &str) -> std::io::Result<usize> {
         use std::io::Write;
-        // SAFETY: AtomicU8 is repr(transparent) over u8, so the Vec<AtomicU8>
-        // backing store is a contiguous [u8] with identical layout.
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(self.values.as_ptr() as *const u8, self.values.len())
-        };
-        let f = std::fs::File::create(path)?;
-        let mut w = std::io::BufWriter::new(f);
-        w.write_all(bytes)?;
-        w.flush()?;
+        let bytes = self.bytes();
+        let tmp = format!("{}.tmp", path);
+        {
+            let f = std::fs::File::create(&tmp)?;
+            let mut w = std::io::BufWriter::with_capacity(1 << 22, f);
+            w.write_all(bytes)?;
+            w.flush()?;
+            w.into_inner()?.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)?;
         Ok(bytes.len())
+    }
+
+    /// Write a pass-boundary checkpoint: the full table at `ckpt` (atomic) and
+    /// a tiny sidecar `<ckpt>.meta` with the pass number and per-block changed
+    /// flags. The table is written first, then the meta, so a meta present on
+    /// disk always refers to a fully-written table.
+    fn save_checkpoint(&self, ckpt: &str, pass_no: usize, changed: &[bool]) -> std::io::Result<()> {
+        use std::io::Write;
+        self.save(ckpt)?;
+        let meta = format!("{}.meta", ckpt);
+        let tmp = format!("{}.tmp", meta);
+        {
+            let mut f = std::fs::File::create(&tmp)?;
+            // Format: "total pass_no\nflags(0/1 per block)\n"
+            writeln!(f, "{} {}", self.total, pass_no)?;
+            let flags: String = changed.iter().map(|&c| if c { '1' } else { '0' }).collect();
+            writeln!(f, "{}", flags)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, &meta)?;
+        Ok(())
+    }
+
+    /// Load a checkpoint's table into `self.values` and return (pass_no,
+    /// changed_prev) if a valid, matching checkpoint exists. Mutates the table
+    /// in place. Returns None if there is no checkpoint or it doesn't match.
+    fn load_checkpoint(&self, ckpt: &str, nb: usize) -> Option<(usize, Vec<bool>)> {
+        let meta = format!("{}.meta", ckpt);
+        let meta_txt = std::fs::read_to_string(&meta).ok()?;
+        let mut lines = meta_txt.lines();
+        let header = lines.next()?;
+        let mut it = header.split_whitespace();
+        let total: u64 = it.next()?.parse().ok()?;
+        let pass_no: usize = it.next()?.parse().ok()?;
+        if total != self.total {
+            eprintln!("checkpoint total {} != current {}; ignoring", total, self.total);
+            return None;
+        }
+        let flags_line = lines.next()?;
+        if flags_line.len() != nb {
+            return None;
+        }
+        let changed: Vec<bool> = flags_line.chars().map(|c| c == '1').collect();
+        // Load the table bytes into the (already allocated) values in place.
+        let bytes = std::fs::read(ckpt).ok()?;
+        if bytes.len() as u64 != self.total {
+            eprintln!("checkpoint table size mismatch; ignoring");
+            return None;
+        }
+        for (dst, &b) in self.values.iter().zip(bytes.iter()) {
+            dst.store(b, Ordering::Relaxed);
+        }
+        Some((pass_no, changed))
     }
 
     /// Load a value table from disk. Must match the current index total.

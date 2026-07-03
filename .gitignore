@@ -7,7 +7,8 @@ rl/target/
 rl/models/
 solver/target/
 solver/table.bin
-solver/table.bin.tmp
 solver/*.ckpt
+solver/*.ckpt.meta
+solver/*.tmp
 solver/*.log
 rl/*.log
