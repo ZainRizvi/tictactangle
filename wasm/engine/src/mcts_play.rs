@@ -37,7 +37,7 @@ struct Node {
 // All-zero placeholder so the static pool lands in BSS (zero bytes aren't
 // stored in the wasm binary). Every node is fully written before first use.
 const EMPTY_NODE: Node = Node {
-    state: State { board: [0; 25], cr: 0, cc: 0, turn: 0, ls_r: 0, ls_c: 0, bn_r: 0, bn_c: 0 },
+    state: State { board: [0; 25], cr: 0, cc: 0, turn: 0, ls_r: 0, ls_c: 0, bn: 0, bn_prev: 0 },
     mv: 0,
     parent: 0,
     first_child: 0,

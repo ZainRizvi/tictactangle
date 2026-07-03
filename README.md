@@ -15,8 +15,10 @@ Played on a 5×5 board with a movable 3×3 grid (the "spotlight"). Each player h
   - **Move** one of your pieces — from anywhere on the board — to an empty lit cell.
 - First player with three-in-a-row of their own pieces *inside the lit grid* wins. Pieces outside the light don't count.
 - If a grid slide lights up three-in-a-row for both players at once, the game is a tie.
-- Anti-loop: if your grid slide gets undone by the opponent, you may not immediately
-  repeat it (the undo itself is legal; the ban covers only that one slide, for one turn).
+- Anti-loop: every slide of yours that the opponent undoes joins your banned list and
+  may not be repeated; the list keeps growing while the opponent keeps answering with
+  undos, and clears as soon as they make any non-undo move. The undo itself is always
+  legal. (Kills rotating shuffles like A→B→A→C→A→B, not just the two-cycle.)
 
 Two modes: local two-player, or versus an AI opponent that runs entirely in your browser.
 

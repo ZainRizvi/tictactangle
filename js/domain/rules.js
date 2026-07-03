@@ -7,8 +7,11 @@
 // First player with 3-in-a-row of their pieces inside the grid wins; a grid
 // slide that produces a line for both players at once is a tie.
 // Anti-loop: if your grid slide is undone by the opponent's reply slide, you
-// may not immediately repeat it. Any other move is allowed, and the ban
-// lasts only that one turn. The undo itself is always legal.
+// may not repeat it — and the ban ACCUMULATES: as long as the opponent keeps
+// answering your slides with undos, every undone slide stays on your banned
+// list. The list clears as soon as the opponent makes any non-undo move.
+// The undo itself is always legal. This kills A→B→A→B as well as rotating
+// shuffles like A→B→A→C→A→B.
 
 export const EMPTY = 0;
 export const X = 1;
@@ -36,7 +39,8 @@ export function newGame() {
     placed: { [X]: 0, [O]: 0 },
     ply: 0,
     lastSlideFrom: null, // {r,c} origin of the last move iff it was a slide
-    bannedSlideTo: null, // {r,c} the side to move may not slide here this turn
+    bannedSlideTos: [], // centers the side to move may not slide to
+    prevBannedSlideTos: [], // the list that applied to the player who just moved
     result: null, // {type:'win', winner, line} | {type:'tie', xLine, oLine}
   };
 }
@@ -50,7 +54,8 @@ export function cloneState(s) {
     placed: { [X]: s.placed[X], [O]: s.placed[O] },
     ply: s.ply,
     lastSlideFrom: s.lastSlideFrom ? { r: s.lastSlideFrom.r, c: s.lastSlideFrom.c } : null,
-    bannedSlideTo: s.bannedSlideTo ? { r: s.bannedSlideTo.r, c: s.bannedSlideTo.c } : null,
+    bannedSlideTos: s.bannedSlideTos.map((p) => ({ r: p.r, c: p.c })),
+    prevBannedSlideTos: s.prevBannedSlideTos.map((p) => ({ r: p.r, c: p.c })),
     result: s.result,
   };
 }
@@ -83,8 +88,9 @@ export function gridMoveValid(s, dr, dc) {
   const nr = s.center.r + dr;
   const nc = s.center.c + dc;
   if (nr < CENTER_MIN || nr > CENTER_MAX || nc < CENTER_MIN || nc > CENTER_MAX) return false;
-  // Anti-loop: may not repeat the slide the opponent just undid.
-  if (s.bannedSlideTo && nr === s.bannedSlideTo.r && nc === s.bannedSlideTo.c) return false;
+  // Anti-loop: may not repeat any of your slides the opponent has undone
+  // (accumulated for as long as the undo pattern continues).
+  if (s.bannedSlideTos.some((p) => p.r === nr && p.c === nc)) return false;
   return true;
 }
 
@@ -147,14 +153,21 @@ export function applyMove(s, m) {
   // necessarily an exact undo of the previous slide: slides are one step, the
   // previous slide went lastSlideFrom -> s.center, and this slide starts from
   // s.center — so matching destinations means matching (reversed) endpoints.
-  // An undo bans the side now to move from re-creating the undone center
-  // (s.center) on this one turn; any other move leaves no ban.
+  // An undo EXTENDS the opponent's accumulated ban list (the list that
+  // applied to them on their last turn, carried in prevBannedSlideTos) with
+  // the center their undone slide had created; any non-undo move clears it.
+  // No duplicate can enter the list: the undone slide was legal, so its
+  // destination wasn't on the mover's list at the time.
   const undid =
     m.type === 'grid' &&
     s.lastSlideFrom &&
     n.center.r === s.lastSlideFrom.r &&
     n.center.c === s.lastSlideFrom.c;
-  n.bannedSlideTo = undid ? { r: s.center.r, c: s.center.c } : null;
+  const carried = n.bannedSlideTos; // clone's fresh copy of s.bannedSlideTos
+  n.bannedSlideTos = undid
+    ? [...n.prevBannedSlideTos, { r: s.center.r, c: s.center.c }]
+    : [];
+  n.prevBannedSlideTos = carried;
   n.lastSlideFrom = m.type === 'grid' ? { r: s.center.r, c: s.center.c } : null;
   n.ply++;
 

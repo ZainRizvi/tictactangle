@@ -73,7 +73,18 @@ pub fn initial_state() -> State {
         turn: 1,
         ls_r: -1,
         ls_c: -1,
-        bn_r: -1,
-        bn_c: -1,
+        bn: 0,
+        bn_prev: 0,
     }
+}
+
+/// Training assumes NO move banning (per project direction): stripping the
+/// anti-loop fields after every transition means undos are never detected
+/// and bans never arm, so self-play explores the unrestricted game.
+pub fn no_ban(mut s: State) -> State {
+    s.ls_r = -1;
+    s.ls_c = -1;
+    s.bn = 0;
+    s.bn_prev = 0;
+    s
 }

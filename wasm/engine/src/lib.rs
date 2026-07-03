@@ -36,9 +36,17 @@ pub struct State {
     // Origin center of the last move iff it was a slide (-1,-1 = none).
     pub ls_r: i8,
     pub ls_c: i8,
-    // Center the side to move may not slide to this turn (-1,-1 = none).
-    pub bn_r: i8,
-    pub bn_c: i8,
+    // Anti-loop ban lists as 9-bit masks over grid centers
+    // (bit = (r-1)*3 + (c-1)): `bn` = centers the side to move may not slide
+    // to; `bn_prev` = the list that applied to the player who just moved
+    // (carried so an undo can extend it).
+    pub bn: u16,
+    pub bn_prev: u16,
+}
+
+#[inline]
+fn center_bit(r: i8, c: i8) -> u16 {
+    1 << ((r - 1) * 3 + (c - 1))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -147,7 +155,7 @@ pub fn legal_moves(s: &State, out: &mut [Move; 96]) -> usize {
         for &(dr, dc) in &DIRS {
             let nr = s.cr + dr;
             let nc = s.cc + dc;
-            if (1..=3).contains(&nr) && (1..=3).contains(&nc) && !(nr == s.bn_r && nc == s.bn_c) {
+            if (1..=3).contains(&nr) && (1..=3).contains(&nc) && s.bn & center_bit(nr, nc) == 0 {
                 out[n] = pack(1, (dr + 1) as u32, (dc + 1) as u32);
                 n += 1;
             }
@@ -172,23 +180,22 @@ pub fn apply(s: &State, m: Move) -> (State, Outcome) {
     let kind = m >> 16;
     let a = (m >> 8) & 0xFF;
     let b = m & 0xFF;
-    // Anti-loop bookkeeping: any move clears the ban and the slide record;
-    // a slide records its origin, and a slide that lands on the previous
-    // slide's origin (necessarily an exact undo — slides are one step and
-    // this slide starts where the previous one ended) bans the side now to
-    // move from re-creating the undone center for one turn.
+    // Anti-loop bookkeeping. A slide landing on the previous slide's origin
+    // is necessarily an exact undo (slides are one step and this slide
+    // starts where the previous one ended): it EXTENDS the opponent's
+    // accumulated ban list (carried in bn_prev) with the center their undone
+    // slide had created. Any non-undo move clears the opponent's list.
     n.ls_r = -1;
     n.ls_c = -1;
-    n.bn_r = -1;
-    n.bn_c = -1;
+    n.bn = 0;
+    n.bn_prev = s.bn;
     match kind {
         0 => n.board[a as usize] = n.turn,
         1 => {
             n.cr += a as i8 - 1;
             n.cc += b as i8 - 1;
             if n.cr == s.ls_r && n.cc == s.ls_c {
-                n.bn_r = s.cr;
-                n.bn_c = s.cc;
+                n.bn = s.bn_prev | center_bit(s.cr, s.cc);
             }
             n.ls_r = s.cr;
             n.ls_c = s.cc;
@@ -482,12 +489,13 @@ pub fn choose_scored(s: &State, max_depth: i32, node_budget: i64, seed: u64) -> 
 // WASM API
 // ---------------------------------------------------------------------------
 
-static mut IN_BUF: [u8; 32] = [0; 32];
+static mut IN_BUF: [u8; 40] = [0; 40];
 static mut SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
-/// Pointer to the 32-byte input buffer:
+/// Pointer to the 40-byte input buffer:
 /// bytes 0..25 board (0/1/2), 25 center row, 26 center col, 27 side to move,
-/// 28/29 last slide origin (0 = none), 30/31 banned slide center (0 = none).
+/// 28/29 last slide origin (0 = none), 30/31 banned-centers mask (u16 LE),
+/// 32/33 previous mover's banned-centers mask (u16 LE), 34..40 reserved.
 #[no_mangle]
 pub extern "C" fn input_ptr() -> *mut u8 {
     core::ptr::addr_of_mut!(IN_BUF) as *mut u8
@@ -511,25 +519,22 @@ fn read_input() -> Option<State> {
         turn: buf[27],
         ls_r: buf[28] as i8,
         ls_c: buf[29] as i8,
-        bn_r: buf[30] as i8,
-        bn_c: buf[31] as i8,
+        bn: u16::from_le_bytes([buf[30], buf[31]]),
+        bn_prev: u16::from_le_bytes([buf[32], buf[33]]),
     };
     s.board.copy_from_slice(&buf[..25]);
     if !(1..=3).contains(&s.cr) || !(1..=3).contains(&s.cc) || !(1..=2).contains(&s.turn) {
         return None;
     }
-    // Last-slide origin and banned center: (0,0) means none; anything else
-    // must be a valid grid center or the input is rejected.
+    // Last-slide origin: (0,0) means none; anything else must be a valid
+    // grid center. Ban masks may only use the 9 center bits.
     if s.ls_r == 0 && s.ls_c == 0 {
         s.ls_r = -1;
         s.ls_c = -1;
     } else if !(1..=3).contains(&s.ls_r) || !(1..=3).contains(&s.ls_c) {
         return None;
     }
-    if s.bn_r == 0 && s.bn_c == 0 {
-        s.bn_r = -1;
-        s.bn_c = -1;
-    } else if !(1..=3).contains(&s.bn_r) || !(1..=3).contains(&s.bn_c) {
+    if s.bn & !0x1FF != 0 || s.bn_prev & !0x1FF != 0 {
         return None;
     }
     if s.board.iter().any(|&v| v > 2) || placed(&s, 1) > PIECES || placed(&s, 2) > PIECES {

@@ -159,6 +159,7 @@ fn expand(tree: &mut Tree, id: u32, net: &Net) -> f32 {
     let parent_turn = state.turn;
     for k in 0..n {
         let (ns, out) = apply(&state, moves[k]);
+        let ns = crate::game::no_ban(ns);
         let terminal = match out {
             Outcome::Undecided => None,
             Outcome::Tie => Some(DRAW_V),

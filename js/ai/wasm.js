@@ -26,18 +26,26 @@ export async function createWasmEngine(source, opts = {}) {
     throw new Error('this engine build has no MCTS support');
   }
 
+  // Anti-loop ban lists travel as 9-bit masks over grid centers.
+  const maskOf = (list) =>
+    (list ?? []).reduce((m, p) => m | (1 << ((p.r - 1) * 3 + (p.c - 1))), 0);
+
   return {
     async chooseMove(state) {
       // The memory view must be rebuilt per call: growth detaches buffers.
-      const buf = new Uint8Array(memory.buffer, ptr, 32);
+      const buf = new Uint8Array(memory.buffer, ptr, 40);
       for (let i = 0; i < 25; i++) buf[i] = state.board[i];
       buf[25] = state.center.r;
       buf[26] = state.center.c;
       buf[27] = state.turn;
       buf[28] = state.lastSlideFrom?.r ?? 0;
       buf[29] = state.lastSlideFrom?.c ?? 0;
-      buf[30] = state.bannedSlideTo?.r ?? 0;
-      buf[31] = state.bannedSlideTo?.c ?? 0;
+      const bn = maskOf(state.bannedSlideTos);
+      const bnPrev = maskOf(state.prevBannedSlideTos);
+      buf[30] = bn & 0xff;
+      buf[31] = bn >> 8;
+      buf[32] = bnPrev & 0xff;
+      buf[33] = bnPrev >> 8;
       const packed =
         (mctsSims > 0 ? choose_move_mcts(mctsSims) : choose_move(maxDepth, nodeBudget)) >>> 0;
       if (packed === NO_MOVE) return null;

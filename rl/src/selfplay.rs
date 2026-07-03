@@ -62,6 +62,7 @@ pub fn play_game(net: &Net, sims: u32, temp_plies: u32, rng: &mut Rng) -> (Vec<S
         };
 
         let (ns, out) = apply(&state, mv);
+        let ns = crate::game::no_ban(ns);
         ply += 1;
         match out {
             Outcome::Undecided => {

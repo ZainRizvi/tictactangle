@@ -233,6 +233,7 @@ fn play_match_game(a: &Net, b: &Net, a_is_x: bool, sims: u32, rng: &mut Rng) -> 
             res.visits.iter().max_by_key(|&&(_, v)| v).unwrap().0
         };
         let (ns, out) = apply(&state, mv);
+        let ns = crate::game::no_ban(ns);
         ply += 1;
         match out {
             Outcome::Undecided => {
@@ -270,6 +271,7 @@ fn vs_alphabeta(model: &str, games: u32, sims: u32, depth: u32, budget: u32) {
                 let (tactic, score) = choose_scored(&state, 8, 250_000, rng.next_u64());
                 if score >= WIN || score >= 0.5 {
                     let (ns, out) = apply(&state, tactic);
+                    let ns = crate::game::no_ban(ns);
                     ply += 1;
                     match out {
                         Outcome::Undecided => {
@@ -304,6 +306,7 @@ fn vs_alphabeta(model: &str, games: u32, sims: u32, depth: u32, budget: u32) {
                 choose(&state, depth as i32, budget as i64, rng.next_u64())
             };
             let (ns, out) = apply(&state, mv);
+        let ns = crate::game::no_ban(ns);
             ply += 1;
             match out {
                 Outcome::Undecided => {
